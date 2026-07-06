@@ -1,5 +1,5 @@
 // ---------- Config ----------
-const API_BASE = 'https://vnsdev24-chatspace-api.onrender.com';
+const API_BASE = 'https://vnsdev24-chatspace-api.onrender.com/api';
 
 // ---------- State ----------
 let authMode = 'login'; // 'login' | 'register'
