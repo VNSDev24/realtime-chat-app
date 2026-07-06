@@ -1,5 +1,5 @@
 // ---------- Config ----------
-const API_BASE = 'https://chatspace-backend-8qxu.onrender.com';
+const API_BASE = 'https://vnsdev24-chatspace-api.onrender.com';
 
 // ---------- State ----------
 let authMode = 'login'; // 'login' | 'register'
@@ -98,7 +98,7 @@ async function enterChat() {
 }
 
 function connectSocket() {
-  socket = io('https://chatspace-backend-8qxu.onrender.com', { auth: { token } });
+  socket = io('https://vnsdev24-chatspace-api.onrender.com', { auth: { token } });
 
   socket.on('connect_error', (err) => {
     console.error('Socket connection error:', err.message);
