@@ -10,6 +10,9 @@ let activeRoomId = null;
 let activeRoomName = '';
 let typingTimeout = null;
 
+// roomId -> unread message count, for rooms currently NOT being viewed.
+const unreadCounts = new Map();
+
 // ---------- DOM refs ----------
 const authScreen = document.getElementById('auth-screen');
 const chatScreen = document.getElementById('chat-screen');
@@ -121,7 +124,16 @@ function connectSocket() {
   });
 
   socket.on('receive_message', (msg) => {
-    if (msg.room === activeRoomId) renderMessage(msg);
+    if (msg.room === activeRoomId) {
+      renderMessage(msg);
+    } else {
+      unreadCounts.set(msg.room, (unreadCounts.get(msg.room) || 0) + 1);
+      updateRoomBadge(msg.room);
+    }
+  });
+
+  socket.on('message_deleted', ({ messageId }) => {
+    markMessageDeletedInDom(messageId);
   });
 
   socket.on('user_joined', ({ username }) => {
@@ -150,8 +162,8 @@ async function loadRooms() {
 
   rooms.forEach((room) => {
     const li = document.createElement('li');
-    li.textContent = room.name;
     li.dataset.roomId = room._id;
+    li.innerHTML = `<span class="room-name">${escapeHtml(room.name)}</span><span class="unread-badge hidden"></span>`;
     li.addEventListener('click', () => selectRoom(room._id, room.name));
     roomList.appendChild(li);
   });
@@ -161,9 +173,32 @@ async function loadRooms() {
   }
 }
 
+// Shows/hides and updates the small unread-count badge next to a room's name
+// in the sidebar, based on unreadCounts. Safe to call even if the room isn't
+// currently rendered in the list.
+function updateRoomBadge(roomId) {
+  const li = document.querySelector(`#room-list li[data-room-id="${roomId}"]`);
+  if (!li) return;
+  const badge = li.querySelector('.unread-badge');
+  if (!badge) return;
+
+  const count = unreadCounts.get(roomId) || 0;
+  if (count > 0) {
+    badge.textContent = count > 99 ? '99+' : String(count);
+    badge.classList.remove('hidden');
+  } else {
+    badge.textContent = '';
+    badge.classList.add('hidden');
+  }
+}
+
 async function selectRoom(roomId, roomName) {
   activeRoomId = roomId;
   activeRoomName = roomName;
+
+  // Entering a room clears its unread badge, since its messages are now being viewed.
+  unreadCounts.set(roomId, 0);
+  updateRoomBadge(roomId);
 
   document.querySelectorAll('#room-list li').forEach((li) => {
     li.classList.toggle('active', li.dataset.roomId === roomId);
@@ -233,16 +268,60 @@ function renderMessage(msg) {
   const isOwn = msg.senderName === currentUser.username;
   const wrapper = document.createElement('div');
   wrapper.className = `message ${isOwn ? 'own' : ''}`;
+  wrapper.dataset.messageId = msg._id;
 
   const time = new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const relativeTime = getRelativeTime(msg.createdAt);
+  const isDeleted = msg.deleted || msg.text === 'Message deleted';
+
+  const deleteBtnHtml = (isOwn && !isDeleted)
+    ? `<button class="delete-msg-btn" title="Delete this message" data-message-id="${msg._id}">🗑</button>`
+    : '';
 
   wrapper.innerHTML = `
-    <div class="meta">${isOwn ? 'You' : escapeHtml(msg.senderName)} · ${time}</div>
-    <div class="bubble">${escapeHtml(msg.text)}</div>
+    <div class="meta">${isOwn ? 'You' : escapeHtml(msg.senderName)} · <span class="msg-time" data-ts="${msg.createdAt}" title="${relativeTime}">${time}</span></div>
+    <div class="bubble-row">
+      <div class="bubble ${isDeleted ? 'deleted' : ''}">${isDeleted ? 'Message deleted' : escapeHtml(msg.text)}</div>
+      ${deleteBtnHtml}
+    </div>
   `;
 
   messagesEl.appendChild(wrapper);
   messagesEl.scrollTop = messagesEl.scrollHeight;
+
+  const deleteBtn = wrapper.querySelector('.delete-msg-btn');
+  if (deleteBtn) {
+    deleteBtn.addEventListener('click', () => handleDeleteMessage(msg._id, msg.room || activeRoomId));
+  }
+}
+
+// Calls the REST delete endpoint (server verifies ownership), then updates
+// this browser's own view and notifies other connected clients via socket.
+async function handleDeleteMessage(messageId, roomId) {
+  if (!confirm('Delete this message? This cannot be undone.')) return;
+
+  try {
+    const res = await apiFetch(`/messages/${messageId}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to delete message');
+
+    markMessageDeletedInDom(messageId);
+    socket.emit('delete_message', { roomId, messageId });
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+function markMessageDeletedInDom(messageId) {
+  const wrapper = document.querySelector(`.message[data-message-id="${messageId}"]`);
+  if (!wrapper) return;
+  const bubble = wrapper.querySelector('.bubble');
+  if (bubble) {
+    bubble.textContent = 'Message deleted';
+    bubble.classList.add('deleted');
+  }
+  const btn = wrapper.querySelector('.delete-msg-btn');
+  if (btn) btn.remove();
 }
 
 function renderSystemNote(text) {
@@ -259,6 +338,37 @@ function escapeHtml(str) {
   div.textContent = str;
   return div.innerHTML;
 }
+
+// ---------- Relative time (shown as a hover tooltip on each message's clock time) ----------
+function getRelativeTime(isoString) {
+  const then = new Date(isoString).getTime();
+  const now = Date.now();
+  const diffSeconds = Math.max(0, Math.round((now - then) / 1000));
+
+  if (diffSeconds < 30) return 'Just now';
+  if (diffSeconds < 60) return `${diffSeconds} seconds ago`;
+
+  const diffMinutes = Math.round(diffSeconds / 60);
+  if (diffMinutes < 60) return `${diffMinutes} minute${diffMinutes === 1 ? '' : 's'} ago`;
+
+  const diffHours = Math.round(diffMinutes / 60);
+  if (diffHours < 24) return `${diffHours} hour${diffHours === 1 ? '' : 's'} ago`;
+
+  const diffDays = Math.round(diffHours / 24);
+  if (diffDays < 7) return `${diffDays} day${diffDays === 1 ? '' : 's'} ago`;
+
+  // Beyond a week, just show the actual date rather than an increasingly vague relative string.
+  return new Date(isoString).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+// Keep every visible message's hover tooltip accurate over time (e.g. "Just now"
+// should become "2 minutes ago" without needing a page refresh).
+setInterval(() => {
+  document.querySelectorAll('.msg-time').forEach((el) => {
+    const ts = el.getAttribute('data-ts');
+    if (ts) el.setAttribute('title', getRelativeTime(ts));
+  });
+}, 30000);
 
 // ---------- Helper: authenticated fetch ----------
 function apiFetch(path, options = {}) {

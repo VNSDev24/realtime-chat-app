@@ -8,6 +8,7 @@ const { Server } = require('socket.io');
 
 const authRoutes = require('./routes/auth');
 const roomRoutes = require('./routes/rooms');
+const messageRoutes = require('./routes/messages');
 const { initSocket } = require('./socket/socketHandler');
 
 const PORT = process.env.PORT || 5000;
@@ -24,6 +25,7 @@ app.get('/api/health', (_req, res) => {
 
 app.use('/api/auth', authRoutes);
 app.use('/api/rooms', roomRoutes);
+app.use('/api/messages', messageRoutes);
 
 const server = http.createServer(app);
 const io = new Server(server, {

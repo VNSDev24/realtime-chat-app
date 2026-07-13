@@ -21,6 +21,12 @@ const messageSchema = new mongoose.Schema(
       type: String,
       required: true,
       maxlength: 2000
+    },
+    // Set to true when the sender soft-deletes this message. `text` is
+    // overwritten with a placeholder at that point; the row itself is kept.
+    deleted: {
+      type: Boolean,
+      default: false
     }
   },
   { timestamps: true }

@@ -114,9 +114,17 @@ body {
 #room-list li {
   padding: 10px 12px; border-radius: 8px; cursor: pointer; color: var(--text-dim);
   font-size: 14px; margin-bottom: 2px;
+  display: flex; align-items: center; justify-content: space-between;
 }
 #room-list li:hover { background: var(--panel-light); }
 #room-list li.active { background: var(--accent); color: white; }
+
+.unread-badge {
+  background: var(--error); color: white; font-size: 11px; font-weight: 700;
+  min-width: 18px; height: 18px; border-radius: 9px; padding: 0 5px;
+  display: flex; align-items: center; justify-content: center;
+}
+.unread-badge.hidden { display: none; }
 
 .sidebar-footer {
   padding: 14px 16px; border-top: 1px solid var(--border);
@@ -141,11 +149,21 @@ body {
 
 .message { max-width: 65%; }
 .message .meta { font-size: 12px; color: var(--text-dim); margin-bottom: 3px; }
+.msg-time { cursor: default; border-bottom: 1px dotted var(--text-dim); }
+.bubble-row { display: flex; align-items: center; gap: 6px; }
 .message .bubble {
   background: var(--panel-light); padding: 10px 14px; border-radius: 10px; font-size: 14px;
   line-height: 1.4; word-wrap: break-word;
 }
+.message .bubble.deleted { font-style: italic; opacity: 0.6; }
+.delete-msg-btn {
+  background: none; border: none; cursor: pointer; font-size: 13px; opacity: 0;
+  color: var(--text-dim); padding: 4px; border-radius: 4px; transition: opacity 0.15s ease;
+}
+.message:hover .delete-msg-btn { opacity: 0.7; }
+.delete-msg-btn:hover { opacity: 1 !important; color: var(--error); }
 .message.own { align-self: flex-end; }
+.message.own .bubble-row { flex-direction: row-reverse; }
 .message.own .bubble { background: var(--accent); color: white; }
 .message.own .meta { text-align: right; }
 

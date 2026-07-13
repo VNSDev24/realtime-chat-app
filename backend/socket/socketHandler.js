@@ -98,6 +98,25 @@ function initSocket(io) {
       });
     });
 
+    // Relays a message deletion to everyone else currently in the room, so
+    // their screens update live instead of waiting for a page refresh. The
+    // actual deletion happens via the DELETE /api/messages/:messageId REST
+    // route first; this event just notifies other connected clients. As a
+    // safety check (so a client can't spoof a deletion for a message it
+    // doesn't own), we re-verify against the database before relaying.
+    socket.on('delete_message', async ({ roomId, messageId }) => {
+      if (!roomId || !messageId) return;
+      try {
+        const message = await Message.findById(messageId);
+        if (!message || !message.deleted || message.sender.toString() !== socket.user.id) {
+          return; // not actually deleted, or not this user's message — ignore
+        }
+        io.to(roomId).emit('message_deleted', { messageId });
+      } catch (err) {
+        console.error('delete_message relay error:', err.message);
+      }
+    });
+
     socket.on('disconnect', () => {
       console.log(`Socket disconnected: ${socket.id} (${socket.user.username})`);
       if (currentRoomId) {
