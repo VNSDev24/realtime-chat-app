@@ -45,7 +45,7 @@
       <ul id="room-list"></ul>
 
       <div class="sidebar-footer">
-        <span id="current-username"></span>
+        <span id="current-username" class="clickable-username" title="View profile"></span>
         <button id="logout-btn">Logout</button>
       </div>
     </aside>
@@ -67,6 +67,43 @@
     </main>
   </section>
 
+  <!-- Profile screen -->
+  <section id="profile-screen" class="screen hidden">
+    <div class="profile-container">
+      <button id="back-to-chat-btn" class="back-btn">← Back to chat</button>
+
+      <h1>Your Profile</h1>
+
+      <div class="profile-section">
+        <h3>Change Username</h3>
+        <form id="username-form">
+          <input type="text" id="new-username-input" placeholder="New username" required minlength="3" maxlength="30" />
+          <button type="submit">Update Username</button>
+        </form>
+        <p id="username-form-msg" class="form-msg"></p>
+      </div>
+
+      <div class="profile-section">
+        <h3>Change Password</h3>
+        <form id="password-form">
+          <input type="password" id="current-password-input" placeholder="Current password" required minlength="6" />
+          <input type="password" id="new-password-input" placeholder="New password" required minlength="6" />
+          <button type="submit">Update Password</button>
+        </form>
+        <p id="password-form-msg" class="form-msg"></p>
+      </div>
+
+      <div class="profile-section danger-zone">
+        <h3>Danger Zone</h3>
+        <p class="danger-zone-desc">Permanently delete your account. Your past messages will remain visible to others, but shown as sent by "Deleted User". This cannot be undone.</p>
+        <form id="delete-account-form">
+          <input type="password" id="delete-password-input" placeholder="Enter your password to confirm" required minlength="6" />
+          <button type="submit" class="danger-btn">Delete Account Permanently</button>
+        </form>
+        <p id="delete-form-msg" class="form-msg"></p>
+      </div>
+    </div>
+  </section>
   <!-- New room modal -->
   <div id="room-modal" class="modal hidden">
     <div class="modal-content">

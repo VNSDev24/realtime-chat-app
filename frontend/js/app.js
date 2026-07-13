@@ -40,6 +40,20 @@ const currentUsernameEl = document.getElementById('current-username');
 const logoutBtn = document.getElementById('logout-btn');
 const themeToggleBtn = document.getElementById('theme-toggle-btn');
 
+// Profile screen refs
+const profileScreen = document.getElementById('profile-screen');
+const backToChatBtn = document.getElementById('back-to-chat-btn');
+const usernameForm = document.getElementById('username-form');
+const newUsernameInput = document.getElementById('new-username-input');
+const usernameFormMsg = document.getElementById('username-form-msg');
+const passwordForm = document.getElementById('password-form');
+const currentPasswordInput = document.getElementById('current-password-input');
+const newPasswordInput = document.getElementById('new-password-input');
+const passwordFormMsg = document.getElementById('password-form-msg');
+const deleteAccountForm = document.getElementById('delete-account-form');
+const deletePasswordInput = document.getElementById('delete-password-input');
+const deleteFormMsg = document.getElementById('delete-form-msg');
+
 // ---------- Theme toggle (dark/light) ----------
 function applyTheme(theme) {
   document.body.setAttribute('data-theme', theme);
@@ -104,6 +118,118 @@ logoutBtn.addEventListener('click', () => {
   currentUser = null;
   if (socket) socket.disconnect();
   location.reload();
+});
+
+// ---------- Profile screen ----------
+currentUsernameEl.addEventListener('click', openProfileScreen);
+backToChatBtn.addEventListener('click', closeProfileScreen);
+
+function openProfileScreen() {
+  chatScreen.classList.add('hidden');
+  profileScreen.classList.remove('hidden');
+
+  newUsernameInput.value = currentUser.username;
+  currentPasswordInput.value = '';
+  newPasswordInput.value = '';
+  deletePasswordInput.value = '';
+  usernameFormMsg.textContent = '';
+  passwordFormMsg.textContent = '';
+  deleteFormMsg.textContent = '';
+}
+
+function closeProfileScreen() {
+  profileScreen.classList.add('hidden');
+  chatScreen.classList.remove('hidden');
+}
+
+usernameForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  usernameFormMsg.textContent = '';
+  const newUsername = newUsernameInput.value.trim();
+
+  try {
+    const res = await apiFetch('/users/me', {
+      method: 'PATCH',
+      body: JSON.stringify({ username: newUsername })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to update username');
+
+    // The old token has the previous username baked in — swap in the fresh one.
+    token = data.token;
+    currentUser = data.user;
+    localStorage.setItem('chat_token', token);
+    localStorage.setItem('chat_user', JSON.stringify(currentUser));
+    currentUsernameEl.textContent = currentUser.username;
+
+    // Reconnect the socket so other online users see the new name immediately,
+    // rather than only after this browser's next refresh.
+    if (socket) socket.disconnect();
+    connectSocket();
+    if (activeRoomId) socket.emit('join_room', { roomId: activeRoomId });
+
+    usernameFormMsg.textContent = 'Username updated successfully.';
+    usernameFormMsg.classList.remove('error-text');
+    usernameFormMsg.classList.add('success-text');
+  } catch (err) {
+    usernameFormMsg.textContent = err.message;
+    usernameFormMsg.classList.remove('success-text');
+    usernameFormMsg.classList.add('error-text');
+  }
+});
+
+passwordForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  passwordFormMsg.textContent = '';
+  const currentPassword = currentPasswordInput.value;
+  const newPassword = newPasswordInput.value;
+
+  try {
+    const res = await apiFetch('/users/me/password', {
+      method: 'PATCH',
+      body: JSON.stringify({ currentPassword, newPassword })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to update password');
+
+    currentPasswordInput.value = '';
+    newPasswordInput.value = '';
+    passwordFormMsg.textContent = 'Password updated successfully.';
+    passwordFormMsg.classList.remove('error-text');
+    passwordFormMsg.classList.add('success-text');
+  } catch (err) {
+    passwordFormMsg.textContent = err.message;
+    passwordFormMsg.classList.remove('success-text');
+    passwordFormMsg.classList.add('error-text');
+  }
+});
+
+deleteAccountForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  deleteFormMsg.textContent = '';
+  const password = deletePasswordInput.value;
+
+  const confirmed = confirm(
+    'This will permanently delete your account. Your past messages will remain visible to others as "Deleted User". This cannot be undone. Continue?'
+  );
+  if (!confirmed) return;
+
+  try {
+    const res = await apiFetch('/users/me', {
+      method: 'DELETE',
+      body: JSON.stringify({ password })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to delete account');
+
+    localStorage.removeItem('chat_token');
+    localStorage.removeItem('chat_user');
+    if (socket) socket.disconnect();
+    location.reload();
+  } catch (err) {
+    deleteFormMsg.textContent = err.message;
+    deleteFormMsg.classList.add('error-text');
+  }
 });
 
 // ---------- Enter chat (after login or on page load with valid token) ----------
@@ -265,7 +391,9 @@ messageInput.addEventListener('input', () => {
 });
 
 function renderMessage(msg) {
-  const isOwn = msg.senderName === currentUser.username;
+  // ID-based ownership check: usernames are editable now, so comparing names
+  // is no longer a safe way to know if this is "my" message.
+  const isOwn = msg.sender === currentUser._id;
   const wrapper = document.createElement('div');
   wrapper.className = `message ${isOwn ? 'own' : ''}`;
   wrapper.dataset.messageId = msg._id;
@@ -279,7 +407,7 @@ function renderMessage(msg) {
     : '';
 
   wrapper.innerHTML = `
-    <div class="meta">${isOwn ? 'You' : escapeHtml(msg.senderName)} · <span class="msg-time" data-ts="${msg.createdAt}" title="${relativeTime}">${time}</span></div>
+    <div class="meta">${getInitialsAvatar(msg.senderName)}${isOwn ? 'You' : escapeHtml(msg.senderName)} · <span class="msg-time" data-ts="${msg.createdAt}" title="${relativeTime}">${time}</span></div>
     <div class="bubble-row">
       <div class="bubble ${isDeleted ? 'deleted' : ''}">${isDeleted ? 'Message deleted' : escapeHtml(msg.text)}</div>
       ${deleteBtnHtml}
@@ -293,6 +421,27 @@ function renderMessage(msg) {
   if (deleteBtn) {
     deleteBtn.addEventListener('click', () => handleDeleteMessage(msg._id, msg.room || activeRoomId));
   }
+}
+
+// Deterministically generates a small colored initials avatar for a given
+// display name — no uploads, no storage, same name always yields same color.
+const AVATAR_COLORS = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#06b6d4', '#3b82f6', '#8b5cf6', '#ec4899'];
+function getInitialsAvatar(name) {
+  const safeName = (name || '?').trim();
+  const initials = safeName
+    .split(/\s+/)
+    .map((w) => w[0])
+    .slice(0, 2)
+    .join('')
+    .toUpperCase() || '?';
+
+  let hash = 0;
+  for (let i = 0; i < safeName.length; i++) {
+    hash = safeName.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const color = AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
+
+  return `<span class="avatar" style="background:${color}">${escapeHtml(initials)}</span>`;
 }
 
 // Calls the REST delete endpoint (server verifies ownership), then updates
