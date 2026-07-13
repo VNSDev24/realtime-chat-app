@@ -1,5 +1,5 @@
 // ---------- Config ----------
-const API_BASE = 'https://vnsdev24-chatspace-api.onrender.com/api';
+const API_BASE = 'http://localhost:5000/api';
 
 // ---------- State ----------
 let authMode = 'login'; // 'login' | 'register'
@@ -35,6 +35,22 @@ const sendBtn = document.getElementById('send-btn');
 
 const currentUsernameEl = document.getElementById('current-username');
 const logoutBtn = document.getElementById('logout-btn');
+const themeToggleBtn = document.getElementById('theme-toggle-btn');
+
+// ---------- Theme toggle (dark/light) ----------
+function applyTheme(theme) {
+  document.body.setAttribute('data-theme', theme);
+  themeToggleBtn.textContent = theme === 'light' ? '☀️' : '🌙';
+  localStorage.setItem('chat_theme', theme);
+}
+
+themeToggleBtn.addEventListener('click', () => {
+  const current = document.body.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+  applyTheme(current === 'light' ? 'dark' : 'light');
+});
+
+// Apply saved preference immediately (defaults to the original dark theme if none saved)
+applyTheme(localStorage.getItem('chat_theme') || 'dark');
 
 // ---------- Auth tab switching ----------
 tabLogin.addEventListener('click', () => setAuthMode('login'));
@@ -98,7 +114,7 @@ async function enterChat() {
 }
 
 function connectSocket() {
-  socket = io('https://vnsdev24-chatspace-api.onrender.com', { auth: { token } });
+  socket = io('http://localhost:5000', { auth: { token } });
 
   socket.on('connect_error', (err) => {
     console.error('Socket connection error:', err.message);
