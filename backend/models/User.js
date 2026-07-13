@@ -19,6 +19,20 @@ const userSchema = new mongoose.Schema(
     lastSeen: {
       type: Date,
       default: Date.now
+    },
+    // Brute-force protection: tracks consecutive failed login attempts for
+    // THIS specific account (independent of the IP-based rate limiter, which
+    // only slows down request volume, not targeted password-guessing against
+    // one known username).
+    failedLoginAttempts: {
+      type: Number,
+      default: 0
+    },
+    // When set to a future date, login attempts are rejected until this time,
+    // regardless of whether the password is actually correct.
+    lockUntil: {
+      type: Date,
+      default: null
     }
   },
   { timestamps: true }
@@ -34,6 +48,34 @@ userSchema.pre('save', async function (next) {
 
 userSchema.methods.comparePassword = function (candidatePassword) {
   return bcrypt.compare(candidatePassword, this.password);
+};
+
+// ---------- Account lockout helpers ----------
+const MAX_FAILED_ATTEMPTS = 5;
+const LOCK_DURATION_MS = 15 * 60 * 1000; // 15 minutes
+
+userSchema.methods.isLocked = function () {
+  return Boolean(this.lockUntil && this.lockUntil > new Date());
+};
+
+// Called after a failed password check. Increments the counter and locks the
+// account once the threshold is hit. Kept as a single save() call to avoid
+// a race between reading and writing the count across concurrent requests.
+userSchema.methods.registerFailedLogin = async function () {
+  this.failedLoginAttempts += 1;
+  if (this.failedLoginAttempts >= MAX_FAILED_ATTEMPTS) {
+    this.lockUntil = new Date(Date.now() + LOCK_DURATION_MS);
+    this.failedLoginAttempts = 0; // reset counter for the next lockout cycle
+  }
+  await this.save();
+};
+
+// Called after a successful login — clears any prior failed-attempt history.
+userSchema.methods.registerSuccessfulLogin = async function () {
+  this.failedLoginAttempts = 0;
+  this.lockUntil = null;
+  this.lastSeen = new Date();
+  await this.save();
 };
 
 // Never leak password hash in JSON responses

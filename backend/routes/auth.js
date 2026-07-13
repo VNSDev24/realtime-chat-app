@@ -53,13 +53,22 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
+    // Check lockout BEFORE verifying the password, so a locked account gives
+    // no signal either way about whether the submitted password was correct.
+    if (user.isLocked()) {
+      const minutesLeft = Math.ceil((user.lockUntil - Date.now()) / 60000);
+      return res.status(423).json({
+        error: `Too many failed login attempts. Please try again in ${minutesLeft} minute${minutesLeft === 1 ? '' : 's'}.`
+      });
+    }
+
     const isMatch = await user.comparePassword(password);
     if (!isMatch) {
+      await user.registerFailedLogin();
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    user.lastSeen = new Date();
-    await user.save();
+    await user.registerSuccessfulLogin();
 
     const token = signToken(user);
     res.json({ token, user });
