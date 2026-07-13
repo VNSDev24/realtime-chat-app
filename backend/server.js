@@ -33,6 +33,7 @@ const server = http.createServer(app);
 const io = new Server(server, {
   cors: { origin: CLIENT_ORIGIN, methods: ['GET', 'POST'] }
 });
+app.set('io', io); // lets REST route handlers broadcast live socket events (e.g. room renames)
 
 initSocket(io);
 

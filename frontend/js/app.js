@@ -262,6 +262,20 @@ function connectSocket() {
     markMessageDeletedInDom(messageId);
   });
 
+  // Someone (possibly another browser tab, or the actual room creator) renamed
+  // a room we're currently in — update the sidebar entry and header live.
+  socket.on('room_renamed', ({ roomId, name }) => {
+    const li = document.querySelector(`#room-list li[data-room-id="${roomId}"]`);
+    if (li) {
+      const nameSpan = li.querySelector('.room-name');
+      if (nameSpan) nameSpan.textContent = name;
+    }
+    if (roomId === activeRoomId) {
+      activeRoomName = name;
+      activeRoomNameEl.textContent = `# ${name}`;
+    }
+  });
+
   socket.on('user_joined', ({ username }) => {
     renderSystemNote(`${username} joined the room`);
   });
@@ -289,14 +303,96 @@ async function loadRooms() {
   rooms.forEach((room) => {
     const li = document.createElement('li');
     li.dataset.roomId = room._id;
-    li.innerHTML = `<span class="room-name">${escapeHtml(room.name)}</span><span class="unread-badge hidden"></span>`;
+
+    // Only the room's original creator can rename it.
+    const isCreator = room.createdBy === currentUser._id;
+    const renameBtnHtml = isCreator
+      ? `<button class="rename-room-btn" title="Rename room" data-room-id="${room._id}">✏️</button>`
+      : '';
+
+    li.innerHTML = `
+      <span class="room-name">${escapeHtml(room.name)}</span>
+      <span class="unread-badge hidden"></span>
+      ${renameBtnHtml}
+    `;
     li.addEventListener('click', () => selectRoom(room._id, room.name));
+
+    const renameBtn = li.querySelector('.rename-room-btn');
+    if (renameBtn) {
+      renameBtn.addEventListener('click', (e) => {
+        e.stopPropagation(); // don't also trigger selectRoom
+        startRenameRoom(li, room._id, room.name);
+      });
+    }
+
     roomList.appendChild(li);
   });
 
   if (rooms.length && !activeRoomId) {
     selectRoom(rooms[0]._id, rooms[0].name);
   }
+}
+
+// Swaps a room's sidebar entry into an inline rename input, focused and with
+// the current name pre-selected for quick editing.
+function startRenameRoom(li, roomId, currentName) {
+  const nameSpan = li.querySelector('.room-name');
+  if (!nameSpan) return;
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'room-rename-input';
+  input.value = currentName;
+  input.maxLength = 40;
+
+  nameSpan.replaceWith(input);
+  input.focus();
+  input.select();
+
+  let settled = false; // guards against both blur AND Enter firing the submit twice
+
+  function cancel() {
+    if (settled) return;
+    settled = true;
+    input.replaceWith(nameSpan);
+  }
+
+  async function submit() {
+    if (settled) return;
+    settled = true;
+
+    const newName = input.value.trim();
+    if (!newName || newName === currentName) {
+      input.replaceWith(nameSpan);
+      return;
+    }
+
+    try {
+      const res = await apiFetch(`/rooms/${roomId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ name: newName })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to rename room');
+
+      nameSpan.textContent = data.name;
+      input.replaceWith(nameSpan);
+
+      if (roomId === activeRoomId) {
+        activeRoomName = data.name;
+        activeRoomNameEl.textContent = `# ${data.name}`;
+      }
+    } catch (err) {
+      alert(err.message);
+      input.replaceWith(nameSpan);
+    }
+  }
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') submit();
+    if (e.key === 'Escape') cancel();
+  });
+  input.addEventListener('blur', submit);
 }
 
 // Shows/hides and updates the small unread-count badge next to a room's name
