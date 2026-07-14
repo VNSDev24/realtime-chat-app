@@ -365,3 +365,25 @@ body {
 .make-admin-btn-row:hover { background: var(--accent-hover); }
 .remove-admin-btn { background: var(--error); color: white; }
 .remove-admin-btn:hover { background: #dc2626; }
+
+/* ---------- Blocked users feature ---------- */
+.blocked-users-btn {
+  background: var(--panel-light); color: var(--text); border: 1px solid var(--border);
+  border-radius: 6px; padding: 6px 12px; font-size: 12px; font-weight: 600; cursor: pointer;
+  flex-shrink: 0;
+}
+.blocked-users-btn:hover { background: var(--border); }
+.blocked-users-btn.hidden { display: none; }
+
+.blocked-label {
+  font-size: 12px; color: var(--error); font-weight: 600; flex-shrink: 0;
+}
+
+.online-user-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.block-user-btn { background: var(--error); color: white; }
+.block-user-btn:hover { background: #dc2626; }
+
+.modal-subheading {
+  font-size: 12px; text-transform: uppercase; letter-spacing: 0.4px;
+  color: var(--text-dim); margin: 14px 0 6px;
+}

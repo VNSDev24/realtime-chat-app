@@ -35,11 +35,20 @@ const requestsList = document.getElementById('requests-list');
 const requestsEmptyMsg = document.getElementById('requests-empty-msg');
 const closeRequestsBtn = document.getElementById('close-requests-btn');
 
+const blockedUsersModal = document.getElementById('blocked-users-modal');
+const blockedUsersModalTitle = document.getElementById('blocked-users-modal-title');
+const blockedUsersList = document.getElementById('blocked-users-list');
+const blockedUsersEmptyMsg = document.getElementById('blocked-users-empty-msg');
+const blockCandidatesList = document.getElementById('block-candidates-list');
+const blockCandidatesEmptyMsg = document.getElementById('block-candidates-empty-msg');
+const closeBlockedUsersBtn = document.getElementById('close-blocked-users-btn');
+
 const activeRoomNameEl = document.getElementById('active-room-name');
 const onlineUsersToggle = document.getElementById('online-users-toggle');
 const onlineUsersDropdown = document.getElementById('online-users-dropdown');
 const onlineUsersList = document.getElementById('online-users-list');
 const deleteRoomBtn = document.getElementById('delete-room-btn');
+const blockedUsersBtn = document.getElementById('blocked-users-btn');
 const messagesEl = document.getElementById('messages');
 const typingIndicatorEl = document.getElementById('typing-indicator');
 const messageForm = document.getElementById('message-form');
@@ -350,8 +359,31 @@ function connectSocket() {
       activeRoomNameEl.textContent = 'Select a room';
       resetPresenceDropdown();
       deleteRoomBtn.classList.add('hidden');
+      blockedUsersBtn.classList.add('hidden');
       alert(`This room ("${roomName}") was deleted by an admin.`);
     }
+    loadRooms();
+  });
+
+  // An admin blocked us from a room we're currently sitting in — the server
+  // has already forcibly removed our socket from it; update our own UI to match.
+  socket.on('room_blocked', ({ roomId, roomName }) => {
+    if (roomId === activeRoomId) {
+      activeRoomId = null;
+      messagesEl.innerHTML = '';
+      activeRoomNameEl.textContent = 'Select a room';
+      resetPresenceDropdown();
+      deleteRoomBtn.classList.add('hidden');
+      blockedUsersBtn.classList.add('hidden');
+      alert(`You have been blocked from "${roomName}" by an admin.`);
+    }
+    loadRooms();
+  });
+
+  // We were unblocked — refresh so the room shows as accessible again
+  // instead of the "🚫 Blocked" label.
+  socket.on('room_unblocked', ({ roomName }) => {
+    alert(`You have been unblocked from "${roomName}".`);
     loadRooms();
   });
 
@@ -395,7 +427,14 @@ async function loadRooms() {
       ? `<button class="requests-badge" title="View join requests" data-room-id="${room._id}">🔔 ${room.pendingRequestCount}</button>`
       : '';
 
-    if (room.isRestricted && !room.isMember) {
+    if (room.isBlocked) {
+      // Blocked users can't request access either — just show the label.
+      li.classList.add('restricted-not-member');
+      li.innerHTML = `
+        <span class="room-name">${escapeHtml(room.name)}</span>
+        <span class="blocked-label">🚫 Blocked</span>
+      `;
+    } else if (room.isRestricted && !room.isMember) {
       // Not a member of a restricted room — show a request button instead of
       // letting them click straight into the chat.
       const requestBtnHtml = room.hasPendingRequest
@@ -449,10 +488,12 @@ async function loadRooms() {
     selectRoom(firstJoinableRoom._id, firstJoinableRoom.name);
   }
 
-  // Keep the Delete Room button in sync even if admin status changed for the
-  // CURRENTLY active room without switching rooms (e.g. just got promoted).
+  // Keep the Delete Room / Blocked Users buttons in sync even if admin status
+  // changed for the CURRENTLY active room without switching rooms (e.g. just got promoted).
   if (activeRoomId && roomsById[activeRoomId]) {
-    deleteRoomBtn.classList.toggle('hidden', !roomsById[activeRoomId].isAdmin);
+    const isAdmin = roomsById[activeRoomId].isAdmin;
+    deleteRoomBtn.classList.toggle('hidden', !isAdmin);
+    blockedUsersBtn.classList.toggle('hidden', !isAdmin);
   }
 }
 
@@ -515,16 +556,23 @@ function renderPresenceList(users) {
 
     let actionBtnHtml = '';
     if (viewerIsAdmin && !isSelf && !isCreator) {
-      actionBtnHtml = isAdmin
-        ? `<button class="admin-action-btn remove-admin-btn" data-user-id="${u.userId}">Remove Admin Rights</button>`
-        : `<button class="admin-action-btn make-admin-btn-row" data-user-id="${u.userId}">Make Admin</button>`;
+      if (isAdmin) {
+        actionBtnHtml = `<button class="admin-action-btn remove-admin-btn" data-user-id="${u.userId}">Remove Admin Rights</button>`;
+      } else {
+        // Regular (non-admin) online user — an admin can either promote them
+        // or block them, but blocking an admin isn't allowed (demote first).
+        actionBtnHtml = `
+          <button class="admin-action-btn make-admin-btn-row" data-user-id="${u.userId}">Make Admin</button>
+          <button class="admin-action-btn block-user-btn" data-user-id="${u.userId}">Block</button>
+        `;
+      }
     }
 
     const li = document.createElement('li');
     li.className = 'online-user-row';
     li.innerHTML = `
       <span class="online-user-info">${getInitialsAvatar(u.username)}${escapeHtml(u.username)}${roleTagHtml}</span>
-      ${actionBtnHtml}
+      <span class="online-user-actions">${actionBtnHtml}</span>
     `;
 
     const makeBtn = li.querySelector('.make-admin-btn-row');
@@ -532,6 +580,9 @@ function renderPresenceList(users) {
 
     const removeBtn = li.querySelector('.remove-admin-btn');
     if (removeBtn) removeBtn.addEventListener('click', () => handleDemoteAdmin(activeRoomId, u.userId, u.username));
+
+    const blockBtn = li.querySelector('.block-user-btn');
+    if (blockBtn) blockBtn.addEventListener('click', () => handleBlockUser(activeRoomId, u.userId, u.username));
 
     onlineUsersList.appendChild(li);
   });
@@ -566,6 +617,92 @@ async function handleDemoteAdmin(roomId, userId, username) {
     alert(err.message);
   }
 }
+
+// ---------- Block / unblock users (any admin) ----------
+async function handleBlockUser(roomId, userId, username) {
+  const confirmed = confirm(`Block ${username} from this room? They will be immediately removed if currently inside, and won't be able to rejoin until an admin unblocks them.`);
+  if (!confirmed) return;
+
+  try {
+    const res = await apiFetch(`/rooms/${roomId}/block/${userId}`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to block user');
+    await loadRooms();
+    renderPresenceList(lastPresenceUsers); // the blocked user disappears from presence shortly after eviction
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+async function handleUnblockUser(roomId, userId) {
+  try {
+    const res = await apiFetch(`/rooms/${roomId}/block/${userId}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to unblock user');
+    await openBlockedUsersModal(roomId, activeRoomName); // refresh both lists in the open modal
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+async function openBlockedUsersModal(roomId, roomName) {
+  blockedUsersModalTitle.textContent = `Blocked Users — ${roomName}`;
+  blockedUsersModal.classList.remove('hidden');
+
+  blockedUsersList.innerHTML = '';
+  blockCandidatesList.innerHTML = '';
+  blockedUsersEmptyMsg.classList.add('hidden');
+  blockCandidatesEmptyMsg.classList.add('hidden');
+
+  try {
+    const [blockedRes, candidatesRes] = await Promise.all([
+      apiFetch(`/rooms/${roomId}/blocked`),
+      apiFetch(`/rooms/${roomId}/candidates`)
+    ]);
+    const blocked = await blockedRes.json();
+    const candidates = await candidatesRes.json();
+    if (!blockedRes.ok) throw new Error(blocked.error || 'Failed to load blocked users');
+    if (!candidatesRes.ok) throw new Error(candidates.error || 'Failed to load candidates');
+
+    if (blocked.length === 0) {
+      blockedUsersEmptyMsg.classList.remove('hidden');
+    } else {
+      blocked.forEach((u) => {
+        const li = document.createElement('li');
+        li.className = 'request-item';
+        li.innerHTML = `
+          <span>${getInitialsAvatar(u.username)}${escapeHtml(u.username)}</span>
+          <button class="approve-btn">Unblock</button>
+        `;
+        li.querySelector('button').addEventListener('click', () => handleUnblockUser(roomId, u.userId));
+        blockedUsersList.appendChild(li);
+      });
+    }
+
+    if (candidates.length === 0) {
+      blockCandidatesEmptyMsg.classList.remove('hidden');
+    } else {
+      candidates.forEach((u) => {
+        const li = document.createElement('li');
+        li.className = 'request-item';
+        li.innerHTML = `
+          <span>${getInitialsAvatar(u.username)}${escapeHtml(u.username)}</span>
+          <button class="deny-btn">Block</button>
+        `;
+        li.querySelector('button').addEventListener('click', () => handleBlockUser(roomId, u.userId, u.username));
+        blockCandidatesList.appendChild(li);
+      });
+    }
+  } catch (err) {
+    blockedUsersList.innerHTML = `<li>${escapeHtml(err.message)}</li>`;
+  }
+}
+
+blockedUsersBtn.addEventListener('click', () => {
+  if (!activeRoomId) return;
+  openBlockedUsersModal(activeRoomId, activeRoomName);
+});
+closeBlockedUsersBtn.addEventListener('click', () => blockedUsersModal.classList.add('hidden'));
 
 // ---------- Delete room (any admin) ----------
 async function handleDeleteRoom(roomId, roomName) {
@@ -689,6 +826,7 @@ async function selectRoom(roomId, roomName) {
 
   const room = roomsById[roomId];
   deleteRoomBtn.classList.toggle('hidden', !(room && room.isAdmin));
+  blockedUsersBtn.classList.toggle('hidden', !(room && room.isAdmin));
 
   socket.emit('join_room', { roomId });
 

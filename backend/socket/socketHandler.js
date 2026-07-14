@@ -32,12 +32,30 @@ function removePresence(roomId, socketId) {
   if (members.size === 0) presenceByRoom.delete(roomId);
 }
 
-// A user may access a restricted room's chat only if they created it or are
-// an approved member. Unrestricted rooms have no access check at all,
-// preserving the existing behavior for every room created before this feature.
+// Removes ALL of a user's presence entries from a room (they may have more
+// than one tab/socket open). Used when forcibly evicting a blocked user.
+function removePresenceForUser(roomId, userId) {
+  const members = presenceByRoom.get(roomId);
+  if (!members) return;
+  for (const [socketId, info] of members.entries()) {
+    if (info.userId === userId) members.delete(socketId);
+  }
+  if (members.size === 0) presenceByRoom.delete(roomId);
+}
+
+// A blocked user is rejected regardless of whether the room is restricted —
+// blocking is a per-user override, not tied to the restricted-room concept.
+// Beyond that, a restricted room additionally requires being the creator, an
+// admin, or an approved member. Unrestricted rooms otherwise have no access
+// check at all, preserving existing behavior for every room from before
+// these features existed.
 async function canAccessRoom(userId, roomId) {
-  const room = await Room.findById(roomId).select('createdBy isRestricted members admins');
+  const room = await Room.findById(roomId).select('createdBy isRestricted members admins blockedUsers');
   if (!room) return { allowed: false, reason: 'Room not found' };
+
+  if ((room.blockedUsers || []).some((b) => b.toString() === userId)) {
+    return { allowed: false, reason: 'You have been blocked from this room by an admin', blocked: true };
+  }
   if (!room.isRestricted) return { allowed: true };
   if (room.createdBy && room.createdBy.toString() === userId) return { allowed: true };
   if ((room.admins || []).some((a) => a.toString() === userId)) return { allowed: true };
@@ -69,6 +87,24 @@ function initSocket(io) {
     for (const socketId of socketIds) {
       io.to(socketId).emit(event, payload);
     }
+  };
+
+  // Forcibly removes a user's live socket(s) from a room's Socket.io session
+  // (not just notifying them — actually revoking their real-time presence),
+  // then notifies them why. Used when an admin blocks someone who is
+  // currently sitting in that room.
+  io.evictUserFromRoom = (userId, roomId, event, payload) => {
+    const socketIds = socketsByUser.get(userId);
+    if (!socketIds) return;
+    for (const socketId of socketIds) {
+      const targetSocket = io.sockets.sockets.get(socketId);
+      if (targetSocket) {
+        targetSocket.leave(roomId);
+        targetSocket.emit(event, payload);
+      }
+    }
+    removePresenceForUser(roomId, userId);
+    io.to(roomId).emit('presence_update', getOnlineUsers(roomId));
   };
 
   io.on('connection', (socket) => {

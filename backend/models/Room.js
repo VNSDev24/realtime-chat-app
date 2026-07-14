@@ -41,6 +41,13 @@ const roomSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User'
     }],
+    // Users blocked by an admin from this room. Applies regardless of
+    // isRestricted — blocking is a per-user override that works the same way
+    // on open rooms as on restricted ones. Reversible (see the unblock route).
+    blockedUsers: [{
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    }],
     // Users who have asked to join but haven't been approved/denied yet.
     // A denial simply removes the user from this array — it is not a
     // permanent ban, so they are free to request again later.

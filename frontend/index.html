@@ -61,6 +61,7 @@
             </div>
           </div>
           <button id="delete-room-btn" class="delete-room-btn hidden" title="Delete this room permanently">🗑 Delete Room</button>
+          <button id="blocked-users-btn" class="blocked-users-btn hidden" title="Manage blocked users">🚫 Blocked Users</button>
         </div>
       </header>
 
@@ -140,6 +141,25 @@
       <p id="requests-empty-msg" class="form-msg hidden">No pending requests.</p>
       <div class="modal-actions">
         <button type="button" id="close-requests-btn">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Blocked users management modal (admin only) -->
+  <div id="blocked-users-modal" class="modal hidden">
+    <div class="modal-content">
+      <h3 id="blocked-users-modal-title">Blocked Users</h3>
+
+      <h4 class="modal-subheading">Currently blocked</h4>
+      <ul id="blocked-users-list"></ul>
+      <p id="blocked-users-empty-msg" class="form-msg hidden">No one is currently blocked.</p>
+
+      <h4 class="modal-subheading">Block someone who has used this room</h4>
+      <ul id="block-candidates-list"></ul>
+      <p id="block-candidates-empty-msg" class="form-msg hidden">No eligible users to block.</p>
+
+      <div class="modal-actions">
+        <button type="button" id="close-blocked-users-btn">Close</button>
       </div>
     </div>
   </div>

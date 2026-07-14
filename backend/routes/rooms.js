@@ -1,6 +1,7 @@
 const express = require('express');
 const Room = require('../models/Room');
 const Message = require('../models/Message');
+const User = require('../models/User');
 const { requireAuth } = require('../middleware/auth');
 
 const router = express.Router();
@@ -25,9 +26,12 @@ router.get('/', requireAuth, async (req, res) => {
     const enriched = rooms.map((room) => {
       const isCreator = room.createdBy && room.createdBy.toString() === req.user.id;
       const isAdmin = isAdminOf(room, req.user.id);
-      const isMember = !room.isRestricted
+      const isBlocked = (room.blockedUsers || []).some((b) => b.toString() === req.user.id);
+      const isMember = !isBlocked && (
+        !room.isRestricted
         || isAdmin
-        || (room.members || []).some((m) => m.toString() === req.user.id);
+        || (room.members || []).some((m) => m.toString() === req.user.id)
+      );
       const hasPendingRequest = (room.pendingRequests || []).some((p) => p.toString() === req.user.id);
 
       return {
@@ -35,6 +39,7 @@ router.get('/', requireAuth, async (req, res) => {
         isCreator,
         isAdmin,
         isMember,
+        isBlocked,
         hasPendingRequest,
         // Only meaningful to admins, but just a count — not sensitive on its own.
         pendingRequestCount: isAdmin ? (room.pendingRequests || []).length : 0
@@ -186,6 +191,127 @@ router.delete('/:roomId/admins/:userId', requireAuth, async (req, res) => {
   } catch (err) {
     console.error('Demote admin error:', err.message);
     res.status(500).json({ error: 'Failed to demote admin' });
+  }
+});
+
+// POST /api/rooms/:roomId/block/:userId - block a user from this room.
+// Allowed for any admin. Cannot target another admin or the creator — they
+// would need to be demoted first, as a deliberate separate step.
+router.post('/:roomId/block/:userId', requireAuth, async (req, res) => {
+  try {
+    const room = await Room.findById(req.params.roomId);
+    if (!room) {
+      return res.status(404).json({ error: 'Room not found' });
+    }
+    if (!isAdminOf(room, req.user.id)) {
+      return res.status(403).json({ error: 'Only a room admin can block a user' });
+    }
+
+    const { userId } = req.params;
+    if (isAdminOf(room, userId)) {
+      return res.status(403).json({ error: 'Admins (including the creator) cannot be blocked — demote them first' });
+    }
+    if (room.blockedUsers.some((b) => b.toString() === userId)) {
+      return res.status(400).json({ error: 'That user is already blocked' });
+    }
+
+    room.blockedUsers.push(userId);
+    // Blocking supersedes any prior membership/pending request.
+    room.members = room.members.filter((m) => m.toString() !== userId);
+    room.pendingRequests = room.pendingRequests.filter((p) => p.toString() !== userId);
+    await room.save();
+
+    // If they're currently sitting in this room live, actually evict them —
+    // not just record the block for next time.
+    const io = req.app.get('io');
+    if (io) {
+      io.evictUserFromRoom(userId, room._id.toString(), 'room_blocked', {
+        roomId: room._id,
+        roomName: room.name
+      });
+    }
+
+    res.json({ status: 'blocked' });
+  } catch (err) {
+    console.error('Block user error:', err.message);
+    res.status(500).json({ error: 'Failed to block user' });
+  }
+});
+
+// DELETE /api/rooms/:roomId/block/:userId - unblock a user. Allowed for any admin.
+router.delete('/:roomId/block/:userId', requireAuth, async (req, res) => {
+  try {
+    const room = await Room.findById(req.params.roomId);
+    if (!room) {
+      return res.status(404).json({ error: 'Room not found' });
+    }
+    if (!isAdminOf(room, req.user.id)) {
+      return res.status(403).json({ error: 'Only a room admin can unblock a user' });
+    }
+
+    const { userId } = req.params;
+    room.blockedUsers = room.blockedUsers.filter((b) => b.toString() !== userId);
+    await room.save();
+
+    const io = req.app.get('io');
+    if (io) {
+      io.notifyUser(userId, 'room_unblocked', { roomId: room._id, roomName: room.name });
+    }
+
+    res.json({ status: 'unblocked' });
+  } catch (err) {
+    console.error('Unblock user error:', err.message);
+    res.status(500).json({ error: 'Failed to unblock user' });
+  }
+});
+
+// GET /api/rooms/:roomId/blocked - list currently blocked users. Admin only.
+router.get('/:roomId/blocked', requireAuth, async (req, res) => {
+  try {
+    const room = await Room.findById(req.params.roomId).populate('blockedUsers', 'username');
+    if (!room) {
+      return res.status(404).json({ error: 'Room not found' });
+    }
+    if (!isAdminOf(room, req.user.id)) {
+      return res.status(403).json({ error: 'Only a room admin can view blocked users' });
+    }
+
+    const blocked = room.blockedUsers.map((u) => ({ userId: u._id, username: u.username }));
+    res.json(blocked);
+  } catch (err) {
+    console.error('List blocked users error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch blocked users' });
+  }
+});
+
+// GET /api/rooms/:roomId/candidates - users eligible to be blocked, i.e.
+// anyone who has ever sent a message in this room, excluding admins and
+// anyone already blocked. Admin only. This app has no formal membership
+// roster for open rooms, so message history is the only real record of
+// "who has actually used this room."
+router.get('/:roomId/candidates', requireAuth, async (req, res) => {
+  try {
+    const room = await Room.findById(req.params.roomId);
+    if (!room) {
+      return res.status(404).json({ error: 'Room not found' });
+    }
+    if (!isAdminOf(room, req.user.id)) {
+      return res.status(403).json({ error: 'Only a room admin can view block candidates' });
+    }
+
+    const senderIds = await Message.distinct('sender', { room: room._id });
+    const blockedSet = new Set(room.blockedUsers.map((b) => b.toString()));
+    const adminSet = new Set(room.admins.map((a) => a.toString()));
+
+    const eligibleIds = senderIds
+      .map((id) => id.toString())
+      .filter((id) => !blockedSet.has(id) && !adminSet.has(id));
+
+    const users = await User.find({ _id: { $in: eligibleIds } }).select('username');
+    res.json(users.map((u) => ({ userId: u._id, username: u.username })));
+  } catch (err) {
+    console.error('List block candidates error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch candidates' });
   }
 });
 
@@ -346,9 +472,12 @@ router.get('/:roomId/messages', requireAuth, async (req, res) => {
     // Enforce the same restriction here as on the socket join — otherwise
     // someone could read a restricted room's history via the REST API
     // directly, bypassing the socket-level gate entirely.
-    const room = await Room.findById(roomId).select('createdBy isRestricted members admins');
+    const room = await Room.findById(roomId).select('createdBy isRestricted members admins blockedUsers');
     if (!room) {
       return res.status(404).json({ error: 'Room not found' });
+    }
+    if ((room.blockedUsers || []).some((b) => b.toString() === req.user.id)) {
+      return res.status(403).json({ error: 'You have been blocked from this room by an admin' });
     }
     if (room.isRestricted) {
       const isMember = room.members.some((m) => m.toString() === req.user.id);
