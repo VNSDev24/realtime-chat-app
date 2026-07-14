@@ -37,6 +37,7 @@ const closeRequestsBtn = document.getElementById('close-requests-btn');
 
 const activeRoomNameEl = document.getElementById('active-room-name');
 const onlineUsersEl = document.getElementById('online-users');
+const deleteRoomBtn = document.getElementById('delete-room-btn');
 const messagesEl = document.getElementById('messages');
 const typingIndicatorEl = document.getElementById('typing-indicator');
 const messageForm = document.getElementById('message-form');
@@ -325,13 +326,39 @@ function connectSocket() {
     alert(reason || 'You do not have access to this room.');
   });
 
+  // We were just promoted to admin in some room — refresh so the rename
+  // icon, delete-room button, and requests badge become visible for us.
+  socket.on('admin_granted', ({ roomName }) => {
+    alert(`You are now an admin of "${roomName}". You can rename it, delete it, and approve join requests.`);
+    loadRooms();
+  });
+
+  // We were demoted (by another admin) — refresh so those controls disappear.
+  socket.on('admin_revoked', ({ roomName }) => {
+    alert(`Your admin status for "${roomName}" was revoked.`);
+    loadRooms();
+  });
+
+  // An admin deleted a room we're currently sitting in — don't let the UI
+  // just silently break; bounce back to the room list with a clear reason.
+  socket.on('room_deleted', ({ roomId, roomName }) => {
+    if (roomId === activeRoomId) {
+      activeRoomId = null;
+      messagesEl.innerHTML = '';
+      activeRoomNameEl.textContent = 'Select a room';
+      onlineUsersEl.innerHTML = '';
+      deleteRoomBtn.classList.add('hidden');
+      alert(`This room ("${roomName}") was deleted by an admin.`);
+    }
+    loadRooms();
+  });
+
   socket.on('user_left', ({ username }) => {
     renderSystemNote(`${username} left the room`);
   });
 
   socket.on('presence_update', (users) => {
-    const names = users.map((u) => u.username).join(', ');
-    onlineUsersEl.textContent = users.length ? `● Online: ${names}` : '';
+    renderPresenceList(users);
   });
 
   socket.on('typing', ({ username, isTyping }) => {
@@ -418,6 +445,12 @@ async function loadRooms() {
   if (firstJoinableRoom && !activeRoomId) {
     selectRoom(firstJoinableRoom._id, firstJoinableRoom.name);
   }
+
+  // Keep the Delete Room button in sync even if admin status changed for the
+  // CURRENTLY active room without switching rooms (e.g. just got promoted).
+  if (activeRoomId && roomsById[activeRoomId]) {
+    deleteRoomBtn.classList.toggle('hidden', !roomsById[activeRoomId].isAdmin);
+  }
 }
 
 async function handleRequestJoin(roomId) {
@@ -426,6 +459,77 @@ async function handleRequestJoin(roomId) {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Failed to send join request');
     await loadRooms(); // refresh so this room now shows "Request Sent"
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+// Renders the online-users line, adding a "⭐ Make Admin" button next to any
+// online, non-admin user — but only if the CURRENT viewer is themselves an
+// admin of the currently active room.
+function renderPresenceList(users) {
+  onlineUsersEl.innerHTML = '';
+  if (!users.length) return;
+
+  const activeRoom = roomsById[activeRoomId];
+  const viewerIsAdmin = Boolean(activeRoom && activeRoom.isAdmin);
+  const roomAdmins = (activeRoom && activeRoom.admins) || [];
+
+  const label = document.createElement('span');
+  label.textContent = '● Online: ';
+  onlineUsersEl.appendChild(label);
+
+  users.forEach((u, i) => {
+    const isAlreadyAdmin = roomAdmins.some((a) => a === u.userId);
+    const isSelf = u.userId === currentUser._id;
+
+    const span = document.createElement('span');
+    span.className = 'online-user';
+    span.textContent = u.username + (i < users.length - 1 ? ', ' : '');
+
+    if (viewerIsAdmin && !isAlreadyAdmin && !isSelf) {
+      const btn = document.createElement('button');
+      btn.className = 'make-admin-btn';
+      btn.title = `Make ${u.username} an admin`;
+      btn.textContent = '⭐';
+      btn.addEventListener('click', () => handlePromoteAdmin(activeRoomId, u.userId, u.username));
+      span.appendChild(btn);
+    }
+
+    onlineUsersEl.appendChild(span);
+  });
+}
+
+async function handlePromoteAdmin(roomId, userId, username) {
+  const confirmed = confirm(`Make ${username} an admin of this room? Admins can rename the room, delete it, and approve/deny join requests.`);
+  if (!confirmed) return;
+
+  try {
+    const res = await apiFetch(`/rooms/${roomId}/admins/${userId}`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to promote admin');
+    await loadRooms(); // refresh so admin-only controls appear correctly for everyone
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+// ---------- Delete room (any admin) ----------
+async function handleDeleteRoom(roomId, roomName) {
+  const confirmed = confirm(
+    `Permanently delete "${roomName}"? ALL messages and data in this room will be lost for everyone. This cannot be undone.`
+  );
+  if (!confirmed) return;
+
+  try {
+    const res = await apiFetch(`/rooms/${roomId}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to delete room');
+
+    if (roomId === activeRoomId) {
+      activeRoomId = null;
+    }
+    await loadRooms();
   } catch (err) {
     alert(err.message);
   }
@@ -530,6 +634,9 @@ async function selectRoom(roomId, roomName) {
   messagesEl.innerHTML = '';
   typingIndicatorEl.textContent = '';
 
+  const room = roomsById[roomId];
+  deleteRoomBtn.classList.toggle('hidden', !(room && room.isAdmin));
+
   socket.emit('join_room', { roomId });
 
   const res = await apiFetch(`/rooms/${roomId}/messages?limit=50`);
@@ -617,6 +724,11 @@ async function handleRequestDecision(roomId, userId, decision, listItemEl) {
 }
 
 closeRequestsBtn.addEventListener('click', () => requestsModal.classList.add('hidden'));
+
+deleteRoomBtn.addEventListener('click', () => {
+  if (!activeRoomId) return;
+  handleDeleteRoom(activeRoomId, activeRoomName);
+});
 
 // ---------- Messages ----------
 messageForm.addEventListener('submit', (e) => {

@@ -16,6 +16,14 @@ const roomSchema = new mongoose.Schema(
       maxlength: 200,
       default: ''
     },
+    // Room admins — the creator is automatically included here at creation
+    // and can never be removed from this array by anyone (enforced in the
+    // route handlers, not the schema). Any admin may promote a new admin or
+    // demote another non-creator admin.
+    admins: [{
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    }],
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User'

@@ -14,18 +14,20 @@ router.get('/', requireAuth, async (req, res) => {
 
     const enriched = rooms.map((room) => {
       const isCreator = room.createdBy && room.createdBy.toString() === req.user.id;
+      const isAdmin = isCreator || (room.admins || []).some((a) => a.toString() === req.user.id);
       const isMember = !room.isRestricted
-        || isCreator
+        || isAdmin
         || (room.members || []).some((m) => m.toString() === req.user.id);
       const hasPendingRequest = (room.pendingRequests || []).some((p) => p.toString() === req.user.id);
 
       return {
         ...room,
         isCreator,
+        isAdmin,
         isMember,
         hasPendingRequest,
-        // Only meaningful to the creator, but just a count — not sensitive on its own.
-        pendingRequestCount: isCreator ? (room.pendingRequests || []).length : 0
+        // Only meaningful to admins, but just a count — not sensitive on its own.
+        pendingRequestCount: isAdmin ? (room.pendingRequests || []).length : 0
       };
     });
 
@@ -53,6 +55,7 @@ router.post('/', requireAuth, async (req, res) => {
       name: name.trim(),
       description: description || '',
       createdBy: req.user.id,
+      admins: [req.user.id], // creator is always the first admin, and can never be removed
       isRestricted: Boolean(isRestricted),
       members: [req.user.id] // creator is always an implicit member
     });
@@ -64,7 +67,7 @@ router.post('/', requireAuth, async (req, res) => {
   }
 });
 
-// PATCH /api/rooms/:roomId - rename a room. Only the room's original creator may do this.
+// PATCH /api/rooms/:roomId - rename a room. Any admin (creator or promoted) may do this.
 router.patch('/:roomId', requireAuth, async (req, res) => {
   try {
     const { name } = req.body;
@@ -80,8 +83,8 @@ router.patch('/:roomId', requireAuth, async (req, res) => {
     if (!room) {
       return res.status(404).json({ error: 'Room not found' });
     }
-    if (!room.createdBy || room.createdBy.toString() !== req.user.id) {
-      return res.status(403).json({ error: 'Only the room creator can rename this room' });
+    if (!room.admins.some((a) => a.toString() === req.user.id)) {
+      return res.status(403).json({ error: 'Only a room admin can rename this room' });
     }
 
     const existing = await Room.findOne({ name: trimmed, _id: { $ne: room._id } });
@@ -103,6 +106,106 @@ router.patch('/:roomId', requireAuth, async (req, res) => {
   } catch (err) {
     console.error('Rename room error:', err.message);
     res.status(500).json({ error: 'Failed to rename room' });
+  }
+});
+
+// POST /api/rooms/:roomId/admins/:userId - promote a user to admin.
+// Allowed for the creator OR any existing admin.
+router.post('/:roomId/admins/:userId', requireAuth, async (req, res) => {
+  try {
+    const room = await Room.findById(req.params.roomId);
+    if (!room) {
+      return res.status(404).json({ error: 'Room not found' });
+    }
+    if (!room.admins.some((a) => a.toString() === req.user.id)) {
+      return res.status(403).json({ error: 'Only a room admin can promote a new admin' });
+    }
+
+    const { userId } = req.params;
+    if (room.admins.some((a) => a.toString() === userId)) {
+      return res.status(400).json({ error: 'That user is already an admin' });
+    }
+
+    room.admins.push(userId);
+    // Promotion implies membership for restricted rooms too, so a newly
+    // promoted admin never gets locked out of the room they now help manage.
+    if (!room.members.some((m) => m.toString() === userId)) {
+      room.members.push(userId);
+    }
+    await room.save();
+
+    const io = req.app.get('io');
+    if (io) {
+      io.notifyUser(userId, 'admin_granted', { roomId: room._id, roomName: room.name });
+    }
+
+    res.json({ status: 'promoted' });
+  } catch (err) {
+    console.error('Promote admin error:', err.message);
+    res.status(500).json({ error: 'Failed to promote admin' });
+  }
+});
+
+// DELETE /api/rooms/:roomId/admins/:userId - demote an admin.
+// Allowed for ANY admin (not just the creator) — but the creator can never
+// be targeted, by anyone, including themselves.
+router.delete('/:roomId/admins/:userId', requireAuth, async (req, res) => {
+  try {
+    const room = await Room.findById(req.params.roomId);
+    if (!room) {
+      return res.status(404).json({ error: 'Room not found' });
+    }
+    if (!room.admins.some((a) => a.toString() === req.user.id)) {
+      return res.status(403).json({ error: 'Only a room admin can demote another admin' });
+    }
+
+    const { userId } = req.params;
+    if (room.createdBy && room.createdBy.toString() === userId) {
+      return res.status(403).json({ error: 'The room creator cannot be demoted' });
+    }
+
+    room.admins = room.admins.filter((a) => a.toString() !== userId);
+    await room.save();
+
+    const io = req.app.get('io');
+    if (io) {
+      io.notifyUser(userId, 'admin_revoked', { roomId: room._id, roomName: room.name });
+    }
+
+    res.json({ status: 'demoted' });
+  } catch (err) {
+    console.error('Demote admin error:', err.message);
+    res.status(500).json({ error: 'Failed to demote admin' });
+  }
+});
+
+// DELETE /api/rooms/:roomId - permanently delete a room AND all of its
+// messages. Allowed for any admin (creator or promoted). Irreversible —
+// the frontend is expected to confirm this explicitly before calling it.
+router.delete('/:roomId', requireAuth, async (req, res) => {
+  try {
+    const room = await Room.findById(req.params.roomId);
+    if (!room) {
+      return res.status(404).json({ error: 'Room not found' });
+    }
+    if (!room.admins.some((a) => a.toString() === req.user.id)) {
+      return res.status(403).json({ error: 'Only a room admin can delete this room' });
+    }
+
+    await Message.deleteMany({ room: room._id });
+    await Room.findByIdAndDelete(room._id);
+
+    // Notify anyone currently viewing this room so their screen doesn't just
+    // silently break — kicks them back to the room list with a clear reason.
+    const io = req.app.get('io');
+    if (io) {
+      io.to(room._id.toString()).emit('room_deleted', { roomId: room._id, roomName: room.name });
+    }
+
+    res.json({ status: 'deleted' });
+  } catch (err) {
+    console.error('Delete room error:', err.message);
+    res.status(500).json({ error: 'Failed to delete room' });
   }
 });
 
@@ -148,15 +251,15 @@ router.post('/:roomId/request-join', requireAuth, async (req, res) => {
   }
 });
 
-// GET /api/rooms/:roomId/requests - list pending join requests. Creator only.
+// GET /api/rooms/:roomId/requests - list pending join requests. Any admin may view.
 router.get('/:roomId/requests', requireAuth, async (req, res) => {
   try {
     const room = await Room.findById(req.params.roomId).populate('pendingRequests', 'username');
     if (!room) {
       return res.status(404).json({ error: 'Room not found' });
     }
-    if (!room.createdBy || room.createdBy.toString() !== req.user.id) {
-      return res.status(403).json({ error: 'Only the room creator can view join requests' });
+    if (!room.admins.some((a) => a.toString() === req.user.id)) {
+      return res.status(403).json({ error: 'Only a room admin can view join requests' });
     }
 
     const requests = room.pendingRequests.map((u) => ({ userId: u._id, username: u.username }));
@@ -167,15 +270,15 @@ router.get('/:roomId/requests', requireAuth, async (req, res) => {
   }
 });
 
-// POST /api/rooms/:roomId/requests/:userId/approve - Creator only.
+// POST /api/rooms/:roomId/requests/:userId/approve - Any admin may approve.
 router.post('/:roomId/requests/:userId/approve', requireAuth, async (req, res) => {
   try {
     const room = await Room.findById(req.params.roomId);
     if (!room) {
       return res.status(404).json({ error: 'Room not found' });
     }
-    if (!room.createdBy || room.createdBy.toString() !== req.user.id) {
-      return res.status(403).json({ error: 'Only the room creator can approve join requests' });
+    if (!room.admins.some((a) => a.toString() === req.user.id)) {
+      return res.status(403).json({ error: 'Only a room admin can approve join requests' });
     }
 
     const { userId } = req.params;
@@ -197,16 +300,16 @@ router.post('/:roomId/requests/:userId/approve', requireAuth, async (req, res) =
   }
 });
 
-// POST /api/rooms/:roomId/requests/:userId/deny - Creator only. Not a permanent
-// ban — the user is simply removed from the pending list and may ask again.
+// POST /api/rooms/:roomId/requests/:userId/deny - Any admin may deny. Not a
+// permanent ban — the user is simply removed from the pending list and may ask again.
 router.post('/:roomId/requests/:userId/deny', requireAuth, async (req, res) => {
   try {
     const room = await Room.findById(req.params.roomId);
     if (!room) {
       return res.status(404).json({ error: 'Room not found' });
     }
-    if (!room.createdBy || room.createdBy.toString() !== req.user.id) {
-      return res.status(403).json({ error: 'Only the room creator can deny join requests' });
+    if (!room.admins.some((a) => a.toString() === req.user.id)) {
+      return res.status(403).json({ error: 'Only a room admin can deny join requests' });
     }
 
     const { userId } = req.params;
@@ -233,14 +336,14 @@ router.get('/:roomId/messages', requireAuth, async (req, res) => {
     // Enforce the same restriction here as on the socket join — otherwise
     // someone could read a restricted room's history via the REST API
     // directly, bypassing the socket-level gate entirely.
-    const room = await Room.findById(roomId).select('createdBy isRestricted members');
+    const room = await Room.findById(roomId).select('createdBy isRestricted members admins');
     if (!room) {
       return res.status(404).json({ error: 'Room not found' });
     }
     if (room.isRestricted) {
-      const isCreator = room.createdBy && room.createdBy.toString() === req.user.id;
+      const isAdmin = (room.admins || []).some((a) => a.toString() === req.user.id);
       const isMember = room.members.some((m) => m.toString() === req.user.id);
-      if (!isCreator && !isMember) {
+      if (!isAdmin && !isMember) {
         return res.status(403).json({ error: 'This room requires the creator\'s approval to join' });
       }
     }

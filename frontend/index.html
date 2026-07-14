@@ -53,7 +53,10 @@
     <main class="chat-main">
       <header class="chat-header">
         <h2 id="active-room-name">Select a room</h2>
-        <div id="online-users" class="online-users"></div>
+        <div class="chat-header-right">
+          <div id="online-users" class="online-users"></div>
+          <button id="delete-room-btn" class="delete-room-btn hidden" title="Delete this room permanently">🗑 Delete Room</button>
+        </div>
       </header>
 
       <div id="messages" class="messages"></div>

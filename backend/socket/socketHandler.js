@@ -36,10 +36,11 @@ function removePresence(roomId, socketId) {
 // an approved member. Unrestricted rooms have no access check at all,
 // preserving the existing behavior for every room created before this feature.
 async function canAccessRoom(userId, roomId) {
-  const room = await Room.findById(roomId).select('createdBy isRestricted members');
+  const room = await Room.findById(roomId).select('createdBy isRestricted members admins');
   if (!room) return { allowed: false, reason: 'Room not found' };
   if (!room.isRestricted) return { allowed: true };
   if (room.createdBy && room.createdBy.toString() === userId) return { allowed: true };
+  if ((room.admins || []).some((a) => a.toString() === userId)) return { allowed: true };
   if (room.members.some((m) => m.toString() === userId)) return { allowed: true };
   return { allowed: false, reason: 'This room requires the creator\'s approval to join' };
 }
