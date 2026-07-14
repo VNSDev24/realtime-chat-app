@@ -27,8 +27,16 @@
 
       <form id="auth-form">
         <input type="text" id="username" placeholder="Username" required minlength="3" />
+        <input type="email" id="register-email" placeholder="Email address" class="hidden" />
         <input type="password" id="password" placeholder="Password" required minlength="6" />
         <button type="submit" id="auth-submit">Login</button>
+      </form>
+
+      <form id="register-otp-form" class="hidden">
+        <p class="forgot-form-desc">We've sent a 6-digit verification code to your email. Enter it below to finish creating your account.</p>
+        <input type="text" id="register-otp-input" placeholder="6-digit code" required minlength="6" maxlength="6" />
+        <button type="submit">Verify & Create Account</button>
+        <a href="#" id="register-resend-otp-link">Resend code</a>
       </form>
 
       <p id="auth-error" class="error-text"></p>

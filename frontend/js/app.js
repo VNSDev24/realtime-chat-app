@@ -22,6 +22,11 @@ const authError = document.getElementById('auth-error');
 const tabLogin = document.getElementById('tab-login');
 const tabRegister = document.getElementById('tab-register');
 
+const registerEmailInput = document.getElementById('register-email');
+const registerOtpForm = document.getElementById('register-otp-form');
+const registerOtpInput = document.getElementById('register-otp-input');
+const registerResendOtpLink = document.getElementById('register-resend-otp-link');
+
 const forgotLinks = document.getElementById('forgot-links');
 const forgotUsernameLink = document.getElementById('forgot-username-link');
 const forgotPasswordLink = document.getElementById('forgot-password-link');
@@ -124,21 +129,78 @@ function setAuthMode(mode) {
   tabRegister.classList.toggle('active', mode === 'register');
   authSubmit.textContent = mode === 'login' ? 'Login' : 'Create account';
   authError.textContent = '';
+  authError.classList.remove('success-text');
+  registerEmailInput.classList.toggle('hidden', mode !== 'register');
+  registerEmailInput.required = mode === 'register';
 }
+
+// Tracks the username currently awaiting OTP verification, so the
+// verify/resend calls know which pending registration to act on.
+let pendingRegistrationUsername = null;
 
 // ---------- Auth submit ----------
 authForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   authError.textContent = '';
+  authError.classList.remove('success-text');
 
   const username = document.getElementById('username').value.trim();
   const password = document.getElementById('password').value;
 
   try {
-    const res = await fetch(`${API_BASE}/auth/${authMode === 'login' ? 'login' : 'register'}`, {
+    if (authMode === 'login') {
+      const res = await fetch(`${API_BASE}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Something went wrong');
+
+      token = data.token;
+      currentUser = data.user;
+      localStorage.setItem('chat_token', token);
+      localStorage.setItem('chat_user', JSON.stringify(currentUser));
+
+      enterChat();
+    } else {
+      // Registration is now two steps: start (validates + emails a code),
+      // then verify (which is what actually creates the account).
+      const email = registerEmailInput.value.trim();
+
+      const res = await fetch(`${API_BASE}/auth/register/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password, email })
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Something went wrong');
+
+      pendingRegistrationUsername = username;
+      authForm.classList.add('hidden');
+      document.querySelector('.tabs').classList.add('hidden');
+      forgotLinks.classList.add('hidden');
+      registerOtpForm.classList.remove('hidden');
+      registerOtpInput.value = '';
+    }
+  } catch (err) {
+    authError.textContent = err.message;
+  }
+});
+
+registerOtpForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  authError.textContent = '';
+  authError.classList.remove('success-text');
+  const otp = registerOtpInput.value.trim();
+
+  try {
+    const res = await fetch(`${API_BASE}/auth/register/verify`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password })
+      body: JSON.stringify({ username: pendingRegistrationUsername, otp })
     });
 
     const data = await res.json();
@@ -149,9 +211,34 @@ authForm.addEventListener('submit', async (e) => {
     localStorage.setItem('chat_token', token);
     localStorage.setItem('chat_user', JSON.stringify(currentUser));
 
+    pendingRegistrationUsername = null;
+    registerOtpForm.classList.add('hidden');
+    showAuthDefaultView();
+
     enterChat();
   } catch (err) {
     authError.textContent = err.message;
+  }
+});
+
+registerResendOtpLink.addEventListener('click', async (e) => {
+  e.preventDefault();
+  authError.textContent = '';
+  authError.classList.remove('success-text');
+
+  try {
+    const res = await fetch(`${API_BASE}/auth/register/resend-otp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: pendingRegistrationUsername })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Something went wrong');
+    authError.textContent = data.message;
+    authError.classList.add('success-text');
+  } catch (err) {
+    authError.textContent = err.message;
+    authError.classList.remove('success-text');
   }
 });
 
@@ -162,6 +249,7 @@ function showAuthDefaultView() {
   forgotLinks.classList.remove('hidden');
   forgotUsernameForm.classList.add('hidden');
   forgotPasswordForm.classList.add('hidden');
+  registerOtpForm.classList.add('hidden');
   forgotUsernameMsg.textContent = '';
   forgotPasswordMsg.textContent = '';
 }

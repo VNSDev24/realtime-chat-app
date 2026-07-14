@@ -1,8 +1,10 @@
 const express = require('express');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
+const bcrypt = require('bcryptjs');
 const User = require('../models/User');
-const { sendUsernameEmail, sendPasswordResetEmail } = require('../utils/mailer');
+const PendingRegistration = require('../models/PendingRegistration');
+const { sendUsernameEmail, sendPasswordResetEmail, sendOtpEmail } = require('../utils/mailer');
 
 const router = express.Router();
 
@@ -14,30 +16,149 @@ function signToken(user) {
   );
 }
 
-// POST /api/auth/register
-router.post('/register', async (req, res) => {
-  try {
-    const { username, password } = req.body;
+function generateOtp() {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+}
 
-    if (!username || !password) {
-      return res.status(400).json({ error: 'username and password are required' });
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// POST /api/auth/register/start - validates the new account details, hashes
+// the password immediately, and emails a 6-digit code. The real User account
+// is NOT created yet — see register/verify below for why.
+router.post('/register/start', async (req, res) => {
+  try {
+    const { username, password, email } = req.body;
+
+    if (!username || !password || !email) {
+      return res.status(400).json({ error: 'username, password, and email are required' });
+    }
+    const trimmedUsername = username.trim();
+    const trimmedEmail = email.trim().toLowerCase();
+
+    if (trimmedUsername.length < 3 || trimmedUsername.length > 30) {
+      return res.status(400).json({ error: 'username must be between 3 and 30 characters' });
     }
     if (password.length < 6) {
       return res.status(400).json({ error: 'password must be at least 6 characters' });
     }
-
-    const existing = await User.findOne({ username: username.trim() });
-    if (existing) {
-      return res.status(409).json({ error: 'username already taken' });
+    if (!EMAIL_REGEX.test(trimmedEmail)) {
+      return res.status(400).json({ error: 'Please enter a valid email address' });
     }
 
-    const user = await User.create({ username: username.trim(), password });
-    const token = signToken(user);
+    // Username must be free of BOTH a real account and any other in-progress
+    // (not-yet-expired) registration attempt.
+    const existingUser = await User.findOne({ username: trimmedUsername });
+    if (existingUser) {
+      return res.status(409).json({ error: 'username already taken' });
+    }
+    const existingPending = await PendingRegistration.findOne({ username: trimmedUsername });
+    if (existingPending) {
+      return res.status(409).json({ error: 'That username has a registration already in progress. Try verifying it, or wait for it to expire and try again.' });
+    }
 
+    const existingEmailUser = await User.findOne({ email: trimmedEmail, emailVerified: true });
+    if (existingEmailUser) {
+      return res.status(409).json({ error: 'That email is already associated with an existing account' });
+    }
+
+    // Hash now — this is what gets carried into the real User document
+    // later, so a plaintext password is never persisted, even temporarily.
+    const passwordHash = await bcrypt.hash(password, 10);
+    const otp = generateOtp();
+
+    await PendingRegistration.create({
+      username: trimmedUsername,
+      email: trimmedEmail,
+      passwordHash,
+      otp,
+      otpExpires: new Date(Date.now() + 10 * 60 * 1000) // 10 minutes
+    });
+
+    const { sent } = await sendOtpEmail(trimmedEmail, otp);
+    if (!sent) {
+      return res.status(502).json({ error: 'Failed to send verification email. Please try again shortly.' });
+    }
+
+    res.status(201).json({ message: 'Verification code sent to your email.' });
+  } catch (err) {
+    console.error('Register start error:', err.message);
+    res.status(500).json({ error: 'Failed to start registration' });
+  }
+});
+
+// POST /api/auth/register/verify - the actual User account gets created HERE,
+// only once the code is confirmed correct and unexpired.
+router.post('/register/verify', async (req, res) => {
+  try {
+    const { username, otp } = req.body;
+    if (!username || !otp) {
+      return res.status(400).json({ error: 'username and otp are required' });
+    }
+
+    const pending = await PendingRegistration.findOne({ username: username.trim() });
+    if (!pending) {
+      return res.status(400).json({ error: 'No registration in progress for that username. Please register again.' });
+    }
+    if (pending.otpExpires < new Date()) {
+      return res.status(400).json({ error: 'This code has expired. Please request a new one.' });
+    }
+    if (otp !== pending.otp) {
+      return res.status(400).json({ error: 'Incorrect code. Please check and try again.' });
+    }
+
+    // Double-check the username/email weren't taken by someone else while
+    // this registration was pending (e.g. two people racing on the same
+    // username, one of them via a route other than this one).
+    const existingUser = await User.findOne({ username: pending.username });
+    if (existingUser) {
+      await PendingRegistration.findByIdAndDelete(pending._id);
+      return res.status(409).json({ error: 'username was taken while your verification was pending. Please register again with a different username.' });
+    }
+
+    const user = await User.create({
+      username: pending.username,
+      password: pending.passwordHash, // already bcrypt-hashed — the pre-save hook detects this and skips re-hashing
+      email: pending.email,
+      emailVerified: true // verified as part of registration itself, per the design
+    });
+
+    await PendingRegistration.findByIdAndDelete(pending._id);
+
+    const token = signToken(user);
     res.status(201).json({ token, user });
   } catch (err) {
-    console.error('Register error:', err.message);
-    res.status(500).json({ error: 'Failed to register user' });
+    console.error('Register verify error:', err.message);
+    res.status(500).json({ error: 'Failed to verify registration' });
+  }
+});
+
+// POST /api/auth/register/resend-otp - re-sends a fresh code against an
+// existing pending registration, resetting its expiry.
+router.post('/register/resend-otp', async (req, res) => {
+  try {
+    const { username } = req.body;
+    if (!username) {
+      return res.status(400).json({ error: 'username is required' });
+    }
+
+    const pending = await PendingRegistration.findOne({ username: username.trim() });
+    if (!pending) {
+      return res.status(400).json({ error: 'No registration in progress for that username. Please register again.' });
+    }
+
+    pending.otp = generateOtp();
+    pending.otpExpires = new Date(Date.now() + 10 * 60 * 1000);
+    await pending.save();
+
+    const { sent } = await sendOtpEmail(pending.email, pending.otp);
+    if (!sent) {
+      return res.status(502).json({ error: 'Failed to send verification email. Please try again shortly.' });
+    }
+
+    res.json({ message: 'A new verification code has been sent.' });
+  } catch (err) {
+    console.error('Resend registration OTP error:', err.message);
+    res.status(500).json({ error: 'Failed to resend verification code' });
   }
 });
 

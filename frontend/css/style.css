@@ -418,3 +418,10 @@ body {
 }
 .email-status.verified { color: var(--success); }
 .email-status.pending { color: #eab308; }
+
+/* ---------- Registration email verification ---------- */
+#register-resend-otp-link {
+  display: block; text-align: center; font-size: 13px; color: var(--accent);
+  text-decoration: none; margin-top: 10px;
+}
+#register-resend-otp-link:hover { text-decoration: underline; }

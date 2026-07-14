@@ -82,8 +82,16 @@ const userSchema = new mongoose.Schema(
 );
 
 // Hash password before saving
+// bcrypt hashes always start with one of these version prefixes and are a
+// fixed 60 characters long — a reliable, standard way to detect "this is
+// already a hash" and avoid double-hashing it.
+function looksLikeBcryptHash(value) {
+  return typeof value === 'string' && value.length === 60 && /^\$2[aby]\$/.test(value);
+}
+
 userSchema.pre('save', async function (next) {
   if (!this.isModified('password')) return next();
+  if (looksLikeBcryptHash(this.password)) return next(); // already hashed upstream — see PendingRegistration flow
   const salt = await bcrypt.genSalt(10);
   this.password = await bcrypt.hash(this.password, salt);
   next();
