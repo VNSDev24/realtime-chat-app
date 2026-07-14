@@ -36,7 +36,9 @@ const requestsEmptyMsg = document.getElementById('requests-empty-msg');
 const closeRequestsBtn = document.getElementById('close-requests-btn');
 
 const activeRoomNameEl = document.getElementById('active-room-name');
-const onlineUsersEl = document.getElementById('online-users');
+const onlineUsersToggle = document.getElementById('online-users-toggle');
+const onlineUsersDropdown = document.getElementById('online-users-dropdown');
+const onlineUsersList = document.getElementById('online-users-list');
 const deleteRoomBtn = document.getElementById('delete-room-btn');
 const messagesEl = document.getElementById('messages');
 const typingIndicatorEl = document.getElementById('typing-indicator');
@@ -346,7 +348,7 @@ function connectSocket() {
       activeRoomId = null;
       messagesEl.innerHTML = '';
       activeRoomNameEl.textContent = 'Select a room';
-      onlineUsersEl.innerHTML = '';
+      resetPresenceDropdown();
       deleteRoomBtn.classList.add('hidden');
       alert(`This room ("${roomName}") was deleted by an admin.`);
     }
@@ -358,6 +360,7 @@ function connectSocket() {
   });
 
   socket.on('presence_update', (users) => {
+    lastPresenceUsers = users;
     renderPresenceList(users);
   });
 
@@ -464,39 +467,73 @@ async function handleRequestJoin(roomId) {
   }
 }
 
-// Renders the online-users line, adding a "⭐ Make Admin" button next to any
-// online, non-admin user — but only if the CURRENT viewer is themselves an
-// admin of the currently active room.
+// Cache of the last presence_update payload, so we can re-render the dropdown
+// immediately after an admin promotion/demotion (which changes role tags and
+// button visibility) without waiting for the next actual join/leave event.
+let lastPresenceUsers = [];
+
+onlineUsersToggle.addEventListener('click', (e) => {
+  e.stopPropagation();
+  onlineUsersDropdown.classList.toggle('hidden');
+});
+
+// Close the dropdown when clicking anywhere else on the page.
+document.addEventListener('click', (e) => {
+  if (!onlineUsersDropdown.contains(e.target) && e.target !== onlineUsersToggle) {
+    onlineUsersDropdown.classList.add('hidden');
+  }
+});
+
+function resetPresenceDropdown() {
+  lastPresenceUsers = [];
+  onlineUsersToggle.textContent = '● 0 Online ▾';
+  onlineUsersList.innerHTML = '';
+  onlineUsersDropdown.classList.add('hidden');
+}
+
+// Renders the "N Online" dropdown: every online user's name, their role tag
+// (Creator / Admin / nothing), and — only for an admin viewer, and never on
+// their own row — a "Make Admin" or "Remove Admin Rights" action button.
 function renderPresenceList(users) {
-  onlineUsersEl.innerHTML = '';
+  onlineUsersToggle.textContent = `● ${users.length} Online ▾`;
+  onlineUsersList.innerHTML = '';
   if (!users.length) return;
 
   const activeRoom = roomsById[activeRoomId];
   const viewerIsAdmin = Boolean(activeRoom && activeRoom.isAdmin);
   const roomAdmins = (activeRoom && activeRoom.admins) || [];
+  const creatorId = activeRoom && activeRoom.createdBy;
 
-  const label = document.createElement('span');
-  label.textContent = '● Online: ';
-  onlineUsersEl.appendChild(label);
-
-  users.forEach((u, i) => {
-    const isAlreadyAdmin = roomAdmins.some((a) => a === u.userId);
+  users.forEach((u) => {
+    const isCreator = u.userId === creatorId;
+    const isAdmin = roomAdmins.some((a) => a === u.userId);
     const isSelf = u.userId === currentUser._id;
 
-    const span = document.createElement('span');
-    span.className = 'online-user';
-    span.textContent = u.username + (i < users.length - 1 ? ', ' : '');
+    let roleTagHtml = '';
+    if (isCreator) roleTagHtml = '<span class="role-tag role-tag-creator">Creator</span>';
+    else if (isAdmin) roleTagHtml = '<span class="role-tag role-tag-admin">Admin</span>';
 
-    if (viewerIsAdmin && !isAlreadyAdmin && !isSelf) {
-      const btn = document.createElement('button');
-      btn.className = 'make-admin-btn';
-      btn.title = `Make ${u.username} an admin`;
-      btn.textContent = '⭐';
-      btn.addEventListener('click', () => handlePromoteAdmin(activeRoomId, u.userId, u.username));
-      span.appendChild(btn);
+    let actionBtnHtml = '';
+    if (viewerIsAdmin && !isSelf && !isCreator) {
+      actionBtnHtml = isAdmin
+        ? `<button class="admin-action-btn remove-admin-btn" data-user-id="${u.userId}">Remove Admin Rights</button>`
+        : `<button class="admin-action-btn make-admin-btn-row" data-user-id="${u.userId}">Make Admin</button>`;
     }
 
-    onlineUsersEl.appendChild(span);
+    const li = document.createElement('li');
+    li.className = 'online-user-row';
+    li.innerHTML = `
+      <span class="online-user-info">${getInitialsAvatar(u.username)}${escapeHtml(u.username)}${roleTagHtml}</span>
+      ${actionBtnHtml}
+    `;
+
+    const makeBtn = li.querySelector('.make-admin-btn-row');
+    if (makeBtn) makeBtn.addEventListener('click', () => handlePromoteAdmin(activeRoomId, u.userId, u.username));
+
+    const removeBtn = li.querySelector('.remove-admin-btn');
+    if (removeBtn) removeBtn.addEventListener('click', () => handleDemoteAdmin(activeRoomId, u.userId, u.username));
+
+    onlineUsersList.appendChild(li);
   });
 }
 
@@ -508,7 +545,23 @@ async function handlePromoteAdmin(roomId, userId, username) {
     const res = await apiFetch(`/rooms/${roomId}/admins/${userId}`, { method: 'POST' });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Failed to promote admin');
-    await loadRooms(); // refresh so admin-only controls appear correctly for everyone
+    await loadRooms(); // refreshes roomsById with the new admins list
+    renderPresenceList(lastPresenceUsers); // re-render immediately — dropdown stays open
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+async function handleDemoteAdmin(roomId, userId, username) {
+  const confirmed = confirm(`Remove admin rights from ${username}? They will no longer be able to rename this room, delete it, or approve/deny join requests.`);
+  if (!confirmed) return;
+
+  try {
+    const res = await apiFetch(`/rooms/${roomId}/admins/${userId}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to remove admin rights');
+    await loadRooms();
+    renderPresenceList(lastPresenceUsers); // re-render immediately — dropdown stays open
   } catch (err) {
     alert(err.message);
   }

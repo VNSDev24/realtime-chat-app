@@ -158,13 +158,6 @@ body {
 }
 .chat-header h2 { font-size: 16px; }
 .chat-header-right { display: flex; align-items: center; gap: 14px; }
-.online-users { font-size: 12px; color: var(--success); }
-
-.make-admin-btn {
-  background: none; border: none; cursor: pointer; font-size: 11px;
-  padding: 0 2px; opacity: 0.6;
-}
-.make-admin-btn:hover { opacity: 1; }
 
 .delete-room-btn {
   background: var(--error); color: white; border: none; border-radius: 6px;
@@ -331,3 +324,44 @@ body {
 }
 .approve-btn { background: var(--success); color: white; }
 .deny-btn { background: var(--error); color: white; }
+
+/* ---------- Online users dropdown ---------- */
+.online-users-wrapper { position: relative; }
+
+.online-users-toggle {
+  background: none; border: 1px solid var(--border); color: var(--success);
+  font-size: 12px; border-radius: 6px; padding: 5px 10px; cursor: pointer;
+}
+.online-users-toggle:hover { background: var(--panel-light); }
+
+.online-users-dropdown {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 50;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  min-width: 240px; max-width: 320px; box-shadow: 0 6px 20px rgba(0,0,0,0.25);
+  padding: 6px 0;
+}
+.online-users-dropdown.hidden { display: none; }
+
+#online-users-list { list-style: none; max-height: 260px; overflow-y: auto; }
+.online-user-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 8px 12px; font-size: 13px; color: var(--text);
+}
+.online-user-row:hover { background: var(--panel-light); }
+.online-user-info { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; min-width: 0; }
+
+.role-tag {
+  font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 8px;
+  text-transform: uppercase; letter-spacing: 0.3px;
+}
+.role-tag-creator { background: #eab308; color: #1e293b; }
+.role-tag-admin { background: var(--accent); color: white; }
+
+.admin-action-btn {
+  font-size: 11px; border: none; border-radius: 6px; padding: 4px 8px;
+  cursor: pointer; flex-shrink: 0; white-space: nowrap;
+}
+.make-admin-btn-row { background: var(--accent); color: white; }
+.make-admin-btn-row:hover { background: var(--accent-hover); }
+.remove-admin-btn { background: var(--error); color: white; }
+.remove-admin-btn:hover { background: #dc2626; }
