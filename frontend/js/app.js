@@ -27,6 +27,13 @@ const newRoomBtn = document.getElementById('new-room-btn');
 const roomModal = document.getElementById('room-modal');
 const roomForm = document.getElementById('room-form');
 const cancelRoomBtn = document.getElementById('cancel-room-btn');
+const roomRestrictedCheckbox = document.getElementById('room-restricted-checkbox');
+
+const requestsModal = document.getElementById('requests-modal');
+const requestsModalTitle = document.getElementById('requests-modal-title');
+const requestsList = document.getElementById('requests-list');
+const requestsEmptyMsg = document.getElementById('requests-empty-msg');
+const closeRequestsBtn = document.getElementById('close-requests-btn');
 
 const activeRoomNameEl = document.getElementById('active-room-name');
 const onlineUsersEl = document.getElementById('online-users');
@@ -49,6 +56,7 @@ const usernameFormMsg = document.getElementById('username-form-msg');
 const passwordForm = document.getElementById('password-form');
 const currentPasswordInput = document.getElementById('current-password-input');
 const newPasswordInput = document.getElementById('new-password-input');
+const confirmNewPasswordInput = document.getElementById('confirm-new-password-input');
 const passwordFormMsg = document.getElementById('password-form-msg');
 const deleteAccountForm = document.getElementById('delete-account-form');
 const deletePasswordInput = document.getElementById('delete-password-input');
@@ -131,6 +139,7 @@ function openProfileScreen() {
   newUsernameInput.value = currentUser.username;
   currentPasswordInput.value = '';
   newPasswordInput.value = '';
+  confirmNewPasswordInput.value = '';
   deletePasswordInput.value = '';
   usernameFormMsg.textContent = '';
   passwordFormMsg.textContent = '';
@@ -183,17 +192,26 @@ passwordForm.addEventListener('submit', async (e) => {
   passwordFormMsg.textContent = '';
   const currentPassword = currentPasswordInput.value;
   const newPassword = newPasswordInput.value;
+  const confirmNewPassword = confirmNewPasswordInput.value;
+
+  if (newPassword !== confirmNewPassword) {
+    passwordFormMsg.textContent = 'New password and confirmation do not match.';
+    passwordFormMsg.classList.remove('success-text');
+    passwordFormMsg.classList.add('error-text');
+    return;
+  }
 
   try {
     const res = await apiFetch('/users/me/password', {
       method: 'PATCH',
-      body: JSON.stringify({ currentPassword, newPassword })
+      body: JSON.stringify({ currentPassword, newPassword, confirmNewPassword })
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Failed to update password');
 
     currentPasswordInput.value = '';
     newPasswordInput.value = '';
+    confirmNewPasswordInput.value = '';
     passwordFormMsg.textContent = 'Password updated successfully.';
     passwordFormMsg.classList.remove('error-text');
     passwordFormMsg.classList.add('success-text');
@@ -280,6 +298,33 @@ function connectSocket() {
     renderSystemNote(`${username} joined the room`);
   });
 
+  // Someone requested to join one of our restricted rooms — refresh the
+  // sidebar so the pending-requests badge appears/updates immediately.
+  socket.on('join_request_received', ({ roomName, requesterUsername }) => {
+    renderSystemNote(`${requesterUsername} requested to join "${roomName}"`);
+    loadRooms();
+  });
+
+  // We were approved for a room we'd requested to join — refresh so it now
+  // shows as joinable instead of "Request Sent".
+  socket.on('join_request_approved', ({ roomName }) => {
+    alert(`Your request to join "${roomName}" was approved!`);
+    loadRooms();
+  });
+
+  // We were denied — refresh so the button reverts to "Request to Join"
+  // (this is not a permanent block; the user is free to ask again).
+  socket.on('join_request_denied', ({ roomName }) => {
+    alert(`Your request to join "${roomName}" was denied.`);
+    loadRooms();
+  });
+
+  // Safety-net: the server rejected a join/send attempt at the socket level
+  // (e.g. a stale client tried to act on a room it was removed from).
+  socket.on('room_access_denied', ({ reason }) => {
+    alert(reason || 'You do not have access to this room.');
+  });
+
   socket.on('user_left', ({ username }) => {
     renderSystemNote(`${username} left the room`);
   });
@@ -295,41 +340,94 @@ function connectSocket() {
 }
 
 // ---------- Rooms ----------
+// Cache of the last-loaded room list, keyed by ID, so other handlers (socket
+// events, click handlers) can look up a room's restriction/membership state
+// without a separate round trip.
+let roomsById = {};
+
 async function loadRooms() {
   const res = await apiFetch('/rooms');
   const rooms = await res.json();
   roomList.innerHTML = '';
+  roomsById = {};
 
   rooms.forEach((room) => {
+    roomsById[room._id] = room;
+
     const li = document.createElement('li');
     li.dataset.roomId = room._id;
 
-    // Only the room's original creator can rename it.
-    const isCreator = room.createdBy === currentUser._id;
-    const renameBtnHtml = isCreator
+    const lockIcon = room.isRestricted ? '🔒 ' : '';
+    const renameBtnHtml = room.isCreator
       ? `<button class="rename-room-btn" title="Rename room" data-room-id="${room._id}">✏️</button>`
       : '';
+    const requestsBadgeHtml = (room.isCreator && room.pendingRequestCount > 0)
+      ? `<button class="requests-badge" title="View join requests" data-room-id="${room._id}">🔔 ${room.pendingRequestCount}</button>`
+      : '';
 
-    li.innerHTML = `
-      <span class="room-name">${escapeHtml(room.name)}</span>
-      <span class="unread-badge hidden"></span>
-      ${renameBtnHtml}
-    `;
-    li.addEventListener('click', () => selectRoom(room._id, room.name));
+    if (room.isRestricted && !room.isMember) {
+      // Not a member of a restricted room — show a request button instead of
+      // letting them click straight into the chat.
+      const requestBtnHtml = room.hasPendingRequest
+        ? `<button class="request-join-btn" disabled>Request Sent</button>`
+        : `<button class="request-join-btn" data-room-id="${room._id}">Request to Join</button>`;
 
-    const renameBtn = li.querySelector('.rename-room-btn');
-    if (renameBtn) {
-      renameBtn.addEventListener('click', (e) => {
-        e.stopPropagation(); // don't also trigger selectRoom
-        startRenameRoom(li, room._id, room.name);
-      });
+      li.classList.add('restricted-not-member');
+      li.innerHTML = `
+        <span class="room-name">${lockIcon}${escapeHtml(room.name)}</span>
+        ${requestBtnHtml}
+      `;
+
+      const requestBtn = li.querySelector('.request-join-btn:not([disabled])');
+      if (requestBtn) {
+        requestBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          handleRequestJoin(room._id);
+        });
+      }
+    } else {
+      li.innerHTML = `
+        <span class="room-name">${lockIcon}${escapeHtml(room.name)}</span>
+        <span class="unread-badge hidden"></span>
+        ${requestsBadgeHtml}
+        ${renameBtnHtml}
+      `;
+      li.addEventListener('click', () => selectRoom(room._id, room.name));
+
+      const renameBtn = li.querySelector('.rename-room-btn');
+      if (renameBtn) {
+        renameBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          startRenameRoom(li, room._id, room.name);
+        });
+      }
+
+      const requestsBadge = li.querySelector('.requests-badge');
+      if (requestsBadge) {
+        requestsBadge.addEventListener('click', (e) => {
+          e.stopPropagation();
+          openRequestsModal(room._id, room.name);
+        });
+      }
     }
 
     roomList.appendChild(li);
   });
 
-  if (rooms.length && !activeRoomId) {
-    selectRoom(rooms[0]._id, rooms[0].name);
+  const firstJoinableRoom = rooms.find((r) => r.isMember);
+  if (firstJoinableRoom && !activeRoomId) {
+    selectRoom(firstJoinableRoom._id, firstJoinableRoom.name);
+  }
+}
+
+async function handleRequestJoin(roomId) {
+  try {
+    const res = await apiFetch(`/rooms/${roomId}/request-join`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to send join request');
+    await loadRooms(); // refresh so this room now shows "Request Sent"
+  } catch (err) {
+    alert(err.message);
   }
 }
 
@@ -447,11 +545,12 @@ roomForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   const name = document.getElementById('room-name').value.trim();
   const description = document.getElementById('room-description').value.trim();
+  const isRestricted = roomRestrictedCheckbox.checked;
 
   try {
     const res = await apiFetch('/rooms', {
       method: 'POST',
-      body: JSON.stringify({ name, description })
+      body: JSON.stringify({ name, description, isRestricted })
     });
     const room = await res.json();
     if (!res.ok) throw new Error(room.error);
@@ -464,6 +563,60 @@ roomForm.addEventListener('submit', async (e) => {
     alert(err.message);
   }
 });
+
+// ---------- Pending join requests (creator only) ----------
+async function openRequestsModal(roomId, roomName) {
+  requestsModalTitle.textContent = `Join Requests — ${roomName}`;
+  requestsList.innerHTML = '';
+  requestsEmptyMsg.classList.add('hidden');
+  requestsModal.classList.remove('hidden');
+
+  try {
+    const res = await apiFetch(`/rooms/${roomId}/requests`);
+    const requests = await res.json();
+    if (!res.ok) throw new Error(requests.error || 'Failed to load requests');
+
+    if (requests.length === 0) {
+      requestsEmptyMsg.classList.remove('hidden');
+      return;
+    }
+
+    requests.forEach((r) => {
+      const li = document.createElement('li');
+      li.className = 'request-item';
+      li.innerHTML = `
+        <span>${getInitialsAvatar(r.username)}${escapeHtml(r.username)}</span>
+        <span class="request-actions">
+          <button class="approve-btn" data-user-id="${r.userId}">Approve</button>
+          <button class="deny-btn" data-user-id="${r.userId}">Deny</button>
+        </span>
+      `;
+      li.querySelector('.approve-btn').addEventListener('click', () => handleRequestDecision(roomId, r.userId, 'approve', li));
+      li.querySelector('.deny-btn').addEventListener('click', () => handleRequestDecision(roomId, r.userId, 'deny', li));
+      requestsList.appendChild(li);
+    });
+  } catch (err) {
+    requestsList.innerHTML = `<li>${escapeHtml(err.message)}</li>`;
+  }
+}
+
+async function handleRequestDecision(roomId, userId, decision, listItemEl) {
+  try {
+    const res = await apiFetch(`/rooms/${roomId}/requests/${userId}/${decision}`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `Failed to ${decision} request`);
+
+    listItemEl.remove();
+    if (requestsList.children.length === 0) {
+      requestsEmptyMsg.classList.remove('hidden');
+    }
+    await loadRooms(); // refresh sidebar badge count
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+closeRequestsBtn.addEventListener('click', () => requestsModal.classList.add('hidden'));
 
 // ---------- Messages ----------
 messageForm.addEventListener('submit', (e) => {

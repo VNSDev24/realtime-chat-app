@@ -65,12 +65,17 @@ router.patch('/me', requireAuth, async (req, res) => {
 // PATCH /api/users/me/password - change password (requires current password)
 router.patch('/me/password', requireAuth, async (req, res) => {
   try {
-    const { currentPassword, newPassword } = req.body;
+    const { currentPassword, newPassword, confirmNewPassword } = req.body;
     if (!currentPassword || !newPassword) {
       return res.status(400).json({ error: 'currentPassword and newPassword are required' });
     }
     if (newPassword.length < 6) {
       return res.status(400).json({ error: 'newPassword must be at least 6 characters' });
+    }
+    // Backup check — the frontend already verifies this, but never trust
+    // client-only validation for something like a password change.
+    if (confirmNewPassword !== undefined && newPassword !== confirmNewPassword) {
+      return res.status(400).json({ error: 'newPassword and confirmNewPassword do not match' });
     }
 
     const user = await User.findById(req.user.id);

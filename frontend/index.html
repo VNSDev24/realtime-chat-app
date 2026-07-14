@@ -88,6 +88,7 @@
         <form id="password-form">
           <input type="password" id="current-password-input" placeholder="Current password" required minlength="6" />
           <input type="password" id="new-password-input" placeholder="New password" required minlength="6" />
+          <input type="password" id="confirm-new-password-input" placeholder="Confirm new password" required minlength="6" />
           <button type="submit">Update Password</button>
         </form>
         <p id="password-form-msg" class="form-msg"></p>
@@ -111,11 +112,27 @@
       <form id="room-form">
         <input type="text" id="room-name" placeholder="Room name" required minlength="2" />
         <input type="text" id="room-description" placeholder="Description (optional)" />
+        <label class="checkbox-label">
+          <input type="checkbox" id="room-restricted-checkbox" />
+          🔒 Require approval to join
+        </label>
         <div class="modal-actions">
           <button type="button" id="cancel-room-btn">Cancel</button>
           <button type="submit">Create</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- Pending join requests modal (creator only) -->
+  <div id="requests-modal" class="modal hidden">
+    <div class="modal-content">
+      <h3 id="requests-modal-title">Join Requests</h3>
+      <ul id="requests-list"></ul>
+      <p id="requests-empty-msg" class="form-msg hidden">No pending requests.</p>
+      <div class="modal-actions">
+        <button type="button" id="close-requests-btn">Close</button>
+      </div>
     </div>
   </div>
 
