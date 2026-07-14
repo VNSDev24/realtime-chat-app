@@ -22,6 +22,31 @@ const authError = document.getElementById('auth-error');
 const tabLogin = document.getElementById('tab-login');
 const tabRegister = document.getElementById('tab-register');
 
+const forgotLinks = document.getElementById('forgot-links');
+const forgotUsernameLink = document.getElementById('forgot-username-link');
+const forgotPasswordLink = document.getElementById('forgot-password-link');
+const forgotUsernameForm = document.getElementById('forgot-username-form');
+const forgotUsernameEmail = document.getElementById('forgot-username-email');
+const forgotUsernameMsg = document.getElementById('forgot-username-msg');
+const forgotPasswordForm = document.getElementById('forgot-password-form');
+const forgotPasswordEmail = document.getElementById('forgot-password-email');
+const forgotPasswordMsg = document.getElementById('forgot-password-msg');
+const backToLoginLinks = document.querySelectorAll('.back-to-login-link');
+
+const resetPasswordScreen = document.getElementById('reset-password-screen');
+const resetPasswordForm = document.getElementById('reset-password-form');
+const resetNewPassword = document.getElementById('reset-new-password');
+const resetConfirmPassword = document.getElementById('reset-confirm-password');
+const resetPasswordMsg = document.getElementById('reset-password-msg');
+const resetBackToLoginLink = document.getElementById('reset-back-to-login-link');
+
+const emailForm = document.getElementById('email-form');
+const emailInput = document.getElementById('email-input');
+const emailOtpForm = document.getElementById('email-otp-form');
+const emailOtpInput = document.getElementById('email-otp-input');
+const emailStatus = document.getElementById('email-status');
+const emailFormMsg = document.getElementById('email-form-msg');
+
 const roomList = document.getElementById('room-list');
 const newRoomBtn = document.getElementById('new-room-btn');
 const roomModal = document.getElementById('room-modal');
@@ -130,6 +155,130 @@ authForm.addEventListener('submit', async (e) => {
   }
 });
 
+// ---------- Forgot Username / Forgot Password (login screen) ----------
+function showAuthDefaultView() {
+  authForm.classList.remove('hidden');
+  document.querySelector('.tabs').classList.remove('hidden');
+  forgotLinks.classList.remove('hidden');
+  forgotUsernameForm.classList.add('hidden');
+  forgotPasswordForm.classList.add('hidden');
+  forgotUsernameMsg.textContent = '';
+  forgotPasswordMsg.textContent = '';
+}
+
+forgotUsernameLink.addEventListener('click', (e) => {
+  e.preventDefault();
+  authForm.classList.add('hidden');
+  document.querySelector('.tabs').classList.add('hidden');
+  forgotLinks.classList.add('hidden');
+  forgotUsernameForm.classList.remove('hidden');
+});
+
+forgotPasswordLink.addEventListener('click', (e) => {
+  e.preventDefault();
+  authForm.classList.add('hidden');
+  document.querySelector('.tabs').classList.add('hidden');
+  forgotLinks.classList.add('hidden');
+  forgotPasswordForm.classList.remove('hidden');
+});
+
+backToLoginLinks.forEach((link) => {
+  link.addEventListener('click', (e) => {
+    e.preventDefault();
+    showAuthDefaultView();
+  });
+});
+
+forgotUsernameForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  forgotUsernameMsg.textContent = '';
+  const email = forgotUsernameEmail.value.trim();
+
+  try {
+    const res = await fetch(`${API_BASE}/auth/forgot-username`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Something went wrong');
+    forgotUsernameMsg.textContent = data.message;
+    forgotUsernameMsg.classList.add('success-text');
+  } catch (err) {
+    forgotUsernameMsg.textContent = err.message;
+    forgotUsernameMsg.classList.remove('success-text');
+  }
+});
+
+forgotPasswordForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  forgotPasswordMsg.textContent = '';
+  const email = forgotPasswordEmail.value.trim();
+
+  try {
+    const res = await fetch(`${API_BASE}/auth/forgot-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Something went wrong');
+    forgotPasswordMsg.textContent = data.message;
+    forgotPasswordMsg.classList.add('success-text');
+  } catch (err) {
+    forgotPasswordMsg.textContent = err.message;
+    forgotPasswordMsg.classList.remove('success-text');
+  }
+});
+
+// ---------- Reset Password screen (reached via emailed link with ?resetToken=) ----------
+const urlParams = new URLSearchParams(window.location.search);
+const resetTokenFromUrl = urlParams.get('resetToken');
+
+if (resetTokenFromUrl) {
+  authScreen.classList.add('hidden');
+  resetPasswordScreen.classList.remove('hidden');
+}
+
+resetPasswordForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  resetPasswordMsg.textContent = '';
+
+  const newPassword = resetNewPassword.value;
+  const confirmPassword = resetConfirmPassword.value;
+  if (newPassword !== confirmPassword) {
+    resetPasswordMsg.textContent = 'Passwords do not match.';
+    resetPasswordMsg.classList.remove('success-text');
+    return;
+  }
+
+  try {
+    const res = await fetch(`${API_BASE}/auth/reset-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: resetTokenFromUrl, newPassword })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Something went wrong');
+
+    resetPasswordMsg.textContent = data.message;
+    resetPasswordMsg.classList.add('success-text');
+    resetPasswordForm.classList.add('hidden');
+  } catch (err) {
+    resetPasswordMsg.textContent = err.message;
+    resetPasswordMsg.classList.remove('success-text');
+  }
+});
+
+resetBackToLoginLink.addEventListener('click', (e) => {
+  e.preventDefault();
+  // Strip the token from the URL so a page refresh doesn't re-show this screen.
+  window.history.replaceState({}, document.title, window.location.pathname);
+  resetPasswordScreen.classList.add('hidden');
+  authScreen.classList.remove('hidden');
+  showAuthDefaultView();
+});
+
 // ---------- Logout ----------
 logoutBtn.addEventListener('click', () => {
   localStorage.removeItem('chat_token');
@@ -156,7 +305,87 @@ function openProfileScreen() {
   usernameFormMsg.textContent = '';
   passwordFormMsg.textContent = '';
   deleteFormMsg.textContent = '';
+
+  loadEmailStatus();
 }
+
+async function loadEmailStatus() {
+  emailFormMsg.textContent = '';
+  emailOtpInput.value = '';
+
+  try {
+    const res = await apiFetch('/users/me');
+    const profile = await res.json();
+    if (!res.ok) throw new Error(profile.error || 'Failed to load profile');
+
+    if (profile.emailVerified && profile.email) {
+      emailStatus.textContent = `✅ Verified: ${profile.email}`;
+      emailStatus.className = 'email-status verified';
+      emailForm.classList.remove('hidden');
+      emailOtpForm.classList.add('hidden');
+      emailInput.value = profile.email;
+    } else if (profile.pendingEmail) {
+      emailStatus.textContent = `⏳ Awaiting verification: ${profile.pendingEmail}`;
+      emailStatus.className = 'email-status pending';
+      emailForm.classList.add('hidden');
+      emailOtpForm.classList.remove('hidden');
+    } else {
+      emailStatus.textContent = 'No email on file yet — add one to enable account recovery.';
+      emailStatus.className = 'email-status';
+      emailForm.classList.remove('hidden');
+      emailOtpForm.classList.add('hidden');
+      emailInput.value = '';
+    }
+  } catch (err) {
+    emailStatus.textContent = '';
+    emailFormMsg.textContent = err.message;
+  }
+}
+
+emailForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  emailFormMsg.textContent = '';
+  const email = emailInput.value.trim();
+
+  try {
+    const res = await apiFetch('/users/me/email/send-otp', {
+      method: 'POST',
+      body: JSON.stringify({ email })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to send verification code');
+
+    emailFormMsg.textContent = 'Verification code sent — check your inbox.';
+    emailFormMsg.classList.add('success-text');
+    emailForm.classList.add('hidden');
+    emailOtpForm.classList.remove('hidden');
+  } catch (err) {
+    emailFormMsg.textContent = err.message;
+    emailFormMsg.classList.remove('success-text');
+  }
+});
+
+emailOtpForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  emailFormMsg.textContent = '';
+  const otp = emailOtpInput.value.trim();
+
+  try {
+    const res = await apiFetch('/users/me/email/verify-otp', {
+      method: 'POST',
+      body: JSON.stringify({ otp })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to verify code');
+
+    emailFormMsg.textContent = 'Email verified successfully!';
+    emailFormMsg.classList.add('success-text');
+    await loadEmailStatus();
+  } catch (err) {
+    emailFormMsg.textContent = err.message;
+    emailFormMsg.classList.remove('success-text');
+  }
+});
 
 function closeProfileScreen() {
   profileScreen.classList.add('hidden');

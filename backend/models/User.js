@@ -33,6 +33,49 @@ const userSchema = new mongoose.Schema(
     lockUntil: {
       type: Date,
       default: null
+    },
+    // ---------- Account recovery (email) ----------
+    // Sparse + unique: existing accounts have no email yet, and Mongo's
+    // unique index would otherwise collide on multiple `null` values without
+    // `sparse: true`.
+    email: {
+      type: String,
+      trim: true,
+      lowercase: true,
+      unique: true,
+      sparse: true,
+      default: null
+    },
+    emailVerified: {
+      type: Boolean,
+      default: false
+    },
+    // Holds an email address while it's awaiting OTP confirmation. Kept
+    // separate from `email` so a previously-verified email stays valid and
+    // usable for recovery right up until the NEW one is actually confirmed.
+    pendingEmail: {
+      type: String,
+      trim: true,
+      lowercase: true,
+      default: null
+    },
+    emailOtp: {
+      type: String,
+      default: null
+    },
+    emailOtpExpires: {
+      type: Date,
+      default: null
+    },
+    // Password reset: the token itself is never stored — only its hash —
+    // for the same reason passwords are hashed rather than stored directly.
+    passwordResetTokenHash: {
+      type: String,
+      default: null
+    },
+    passwordResetExpires: {
+      type: Date,
+      default: null
     }
   },
   { timestamps: true }
@@ -78,10 +121,14 @@ userSchema.methods.registerSuccessfulLogin = async function () {
   await this.save();
 };
 
-// Never leak password hash in JSON responses
+// Never leak password hash or recovery secrets in JSON responses
 userSchema.set('toJSON', {
   transform: (_doc, ret) => {
     delete ret.password;
+    delete ret.emailOtp;
+    delete ret.emailOtpExpires;
+    delete ret.passwordResetTokenHash;
+    delete ret.passwordResetExpires;
     return ret;
   }
 });

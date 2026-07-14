@@ -3,6 +3,7 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const Message = require('../models/Message');
 const { requireAuth } = require('../middleware/auth');
+const { sendOtpEmail } = require('../utils/mailer');
 
 const router = express.Router();
 
@@ -17,7 +18,7 @@ function signToken(user) {
 // GET /api/users/me - fetch the current user's own profile
 router.get('/me', requireAuth, async (req, res) => {
   try {
-    const user = await User.findById(req.user.id).select('username createdAt');
+    const user = await User.findById(req.user.id).select('username createdAt email emailVerified pendingEmail');
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
@@ -125,6 +126,88 @@ router.delete('/me', requireAuth, async (req, res) => {
   } catch (err) {
     console.error('Delete account error:', err.message);
     res.status(500).json({ error: 'Failed to delete account' });
+  }
+});
+
+// POST /api/users/me/email/send-otp - start (or restart) email verification.
+// Stores the email as `pendingEmail` — it only becomes the account's real,
+// usable `email` once the OTP is confirmed below.
+router.post('/me/email/send-otp', requireAuth, async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email || !email.trim()) {
+      return res.status(400).json({ error: 'email is required' });
+    }
+    const trimmed = email.trim().toLowerCase();
+
+    // Basic sanity check — not exhaustive email validation, just enough to
+    // catch obvious typos before we spend a Resend send on them.
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+      return res.status(400).json({ error: 'Please enter a valid email address' });
+    }
+
+    const existing = await User.findOne({ email: trimmed, _id: { $ne: req.user.id } });
+    if (existing) {
+      return res.status(409).json({ error: 'That email is already in use on another account' });
+    }
+
+    const user = await User.findById(req.user.id);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    user.pendingEmail = trimmed;
+    user.emailOtp = otp;
+    user.emailOtpExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+    await user.save();
+
+    const { sent } = await sendOtpEmail(trimmed, otp);
+    if (!sent) {
+      return res.status(502).json({ error: 'Failed to send verification email. Please try again shortly.' });
+    }
+
+    res.json({ status: 'otp sent' });
+  } catch (err) {
+    console.error('Send email OTP error:', err.message);
+    res.status(500).json({ error: 'Failed to send verification code' });
+  }
+});
+
+// POST /api/users/me/email/verify-otp - confirm the code and activate the email.
+router.post('/me/email/verify-otp', requireAuth, async (req, res) => {
+  try {
+    const { otp } = req.body;
+    if (!otp) {
+      return res.status(400).json({ error: 'otp is required' });
+    }
+
+    const user = await User.findById(req.user.id);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    if (!user.pendingEmail || !user.emailOtp) {
+      return res.status(400).json({ error: 'No verification is currently in progress. Please request a new code.' });
+    }
+    if (user.emailOtpExpires < new Date()) {
+      return res.status(400).json({ error: 'This code has expired. Please request a new one.' });
+    }
+    if (otp !== user.emailOtp) {
+      return res.status(400).json({ error: 'Incorrect code. Please check and try again.' });
+    }
+
+    user.email = user.pendingEmail;
+    user.emailVerified = true;
+    user.pendingEmail = null;
+    user.emailOtp = null;
+    user.emailOtpExpires = null;
+    await user.save();
+
+    res.json({ status: 'email verified', email: user.email });
+  } catch (err) {
+    console.error('Verify email OTP error:', err.message);
+    res.status(500).json({ error: 'Failed to verify code' });
   }
 });
 

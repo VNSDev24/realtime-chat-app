@@ -390,3 +390,31 @@ body {
   font-size: 12px; text-transform: uppercase; letter-spacing: 0.4px;
   color: var(--text-dim); margin: 14px 0 6px;
 }
+
+/* ---------- Forgot username/password & reset password ---------- */
+#reset-password-screen {
+  display: flex; align-items: center; justify-content: center;
+}
+
+.forgot-links {
+  text-align: center; font-size: 13px; margin-top: 14px; color: var(--text-dim);
+}
+.forgot-links a { color: var(--accent); text-decoration: none; }
+.forgot-links a:hover { text-decoration: underline; }
+.forgot-links span { margin: 0 8px; }
+
+.forgot-form-desc {
+  font-size: 13px; color: var(--text-dim); margin-bottom: 10px; line-height: 1.5;
+}
+.back-to-login-link {
+  display: block; text-align: center; font-size: 13px; color: var(--accent);
+  text-decoration: none; margin-top: 12px;
+}
+.back-to-login-link:hover { text-decoration: underline; }
+
+/* ---------- Email verification (profile screen) ---------- */
+.email-status {
+  font-size: 13px; color: var(--text-dim); margin-bottom: 10px;
+}
+.email-status.verified { color: var(--success); }
+.email-status.pending { color: #eab308; }

@@ -32,6 +32,44 @@
       </form>
 
       <p id="auth-error" class="error-text"></p>
+
+      <div id="forgot-links" class="forgot-links">
+        <a href="#" id="forgot-username-link">Forgot Username?</a>
+        <span>·</span>
+        <a href="#" id="forgot-password-link">Forgot Password?</a>
+      </div>
+
+      <form id="forgot-username-form" class="hidden">
+        <p class="forgot-form-desc">Enter the verified email on your account and we'll send you your username.</p>
+        <input type="email" id="forgot-username-email" placeholder="Email address" required />
+        <button type="submit">Send Username</button>
+        <a href="#" class="back-to-login-link">← Back to login</a>
+      </form>
+      <p id="forgot-username-msg" class="form-msg"></p>
+
+      <form id="forgot-password-form" class="hidden">
+        <p class="forgot-form-desc">Enter the verified email on your account and we'll send you a password reset link.</p>
+        <input type="email" id="forgot-password-email" placeholder="Email address" required />
+        <button type="submit">Send Reset Link</button>
+        <a href="#" class="back-to-login-link">← Back to login</a>
+      </form>
+      <p id="forgot-password-msg" class="form-msg"></p>
+    </div>
+  </section>
+
+  <!-- Reset password screen (shown when the page loads with ?resetToken=... in the URL) -->
+  <section id="reset-password-screen" class="screen hidden">
+    <div class="auth-card">
+      <h1>Reset Password</h1>
+      <p class="subtitle">Choose a new password for your account</p>
+
+      <form id="reset-password-form">
+        <input type="password" id="reset-new-password" placeholder="New password" required minlength="6" />
+        <input type="password" id="reset-confirm-password" placeholder="Confirm new password" required minlength="6" />
+        <button type="submit">Reset Password</button>
+      </form>
+      <p id="reset-password-msg" class="form-msg"></p>
+      <a href="#" id="reset-back-to-login-link" class="back-to-login-link">← Back to login</a>
     </div>
   </section>
 
@@ -101,6 +139,20 @@
           <button type="submit">Update Password</button>
         </form>
         <p id="password-form-msg" class="form-msg"></p>
+      </div>
+
+      <div class="profile-section">
+        <h3>Email (for account recovery)</h3>
+        <p id="email-status" class="email-status"></p>
+        <form id="email-form">
+          <input type="email" id="email-input" placeholder="Your email address" required />
+          <button type="submit">Send Verification Code</button>
+        </form>
+        <form id="email-otp-form" class="hidden">
+          <input type="text" id="email-otp-input" placeholder="6-digit code" required minlength="6" maxlength="6" />
+          <button type="submit">Verify Code</button>
+        </form>
+        <p id="email-form-msg" class="form-msg"></p>
       </div>
 
       <div class="profile-section danger-zone">
