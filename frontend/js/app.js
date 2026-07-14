@@ -303,6 +303,7 @@ function connectSocket() {
     if (roomId === activeRoomId) {
       activeRoomName = name;
       activeRoomNameEl.textContent = `# ${name}`;
+      activeRoomNameEl.title = name;
     }
   });
 
@@ -381,7 +382,7 @@ function connectSocket() {
   });
 
   // We were unblocked — refresh so the room shows as accessible again
-  // instead of the "🚫 Blocked" label.
+  // instead of the "🚫 Admin blocked you" label.
   socket.on('room_unblocked', ({ roomName }) => {
     alert(`You have been unblocked from "${roomName}".`);
     loadRooms();
@@ -431,8 +432,8 @@ async function loadRooms() {
       // Blocked users can't request access either — just show the label.
       li.classList.add('restricted-not-member');
       li.innerHTML = `
-        <span class="room-name">${escapeHtml(room.name)}</span>
-        <span class="blocked-label">🚫 Blocked</span>
+        <span class="room-name" title="${escapeHtml(room.name)}">${escapeHtml(room.name)}</span>
+        <span class="blocked-label">🚫 Admin blocked you</span>
       `;
     } else if (room.isRestricted && !room.isMember) {
       // Not a member of a restricted room — show a request button instead of
@@ -443,7 +444,7 @@ async function loadRooms() {
 
       li.classList.add('restricted-not-member');
       li.innerHTML = `
-        <span class="room-name">${lockIcon}${escapeHtml(room.name)}</span>
+        <span class="room-name" title="${escapeHtml(room.name)}">${lockIcon}${escapeHtml(room.name)}</span>
         ${requestBtnHtml}
       `;
 
@@ -456,7 +457,7 @@ async function loadRooms() {
       }
     } else {
       li.innerHTML = `
-        <span class="room-name">${lockIcon}${escapeHtml(room.name)}</span>
+        <span class="room-name" title="${escapeHtml(room.name)}">${lockIcon}${escapeHtml(room.name)}</span>
         <span class="unread-badge hidden"></span>
         ${requestsBadgeHtml}
         ${renameBtnHtml}
@@ -773,6 +774,7 @@ function startRenameRoom(li, roomId, currentName) {
       if (roomId === activeRoomId) {
         activeRoomName = data.name;
         activeRoomNameEl.textContent = `# ${data.name}`;
+        activeRoomNameEl.title = data.name;
       }
     } catch (err) {
       alert(err.message);
@@ -819,6 +821,7 @@ async function selectRoom(roomId, roomName) {
   });
 
   activeRoomNameEl.textContent = `# ${roomName}`;
+  activeRoomNameEl.title = roomName;
   messageInput.disabled = false;
   sendBtn.disabled = false;
   messagesEl.innerHTML = '';
