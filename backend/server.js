@@ -12,6 +12,7 @@ const messageRoutes = require('./routes/messages');
 const userRoutes = require('./routes/users');
 const { initSocket } = require('./socket/socketHandler');
 const { authLimiter, generalApiLimiter } = require('./middleware/rateLimiter');
+const { backfillRoomAdmins } = require('./migrations/backfillRoomAdmins');
 
 const PORT = process.env.PORT || 5000;
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/realtime_chat';
@@ -55,6 +56,10 @@ async function start() {
   try {
     await mongoose.connect(MONGO_URI);
     console.log('Connected to MongoDB');
+
+    // One-time (per-restart) data fix — see migrations/backfillRoomAdmins.js
+    // for why this is needed and why it's safe to run unconditionally.
+    await backfillRoomAdmins();
 
     server.listen(PORT, () => {
       console.log(`Server listening on port ${PORT}`);

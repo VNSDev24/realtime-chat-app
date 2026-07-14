@@ -5,6 +5,16 @@ const { requireAuth } = require('../middleware/auth');
 
 const router = express.Router();
 
+// Always treats the room's creator as an admin, even if (due to older data
+// created before the admin-roles feature existed) the admins array doesn't
+// actually contain them yet. This is what should have been checked everywhere
+// from the start — the admins array is the source of truth for PROMOTED
+// admins, but the creator's admin status should never depend on it.
+function isAdminOf(room, userId) {
+  if (room.createdBy && room.createdBy.toString() === userId) return true;
+  return (room.admins || []).some((a) => a.toString() === userId);
+}
+
 // GET /api/rooms - list all rooms, enriched with per-user membership info
 // (so the frontend can show "Join" vs "Request to Join" vs a pending badge
 // without a separate round trip per room).
@@ -14,7 +24,7 @@ router.get('/', requireAuth, async (req, res) => {
 
     const enriched = rooms.map((room) => {
       const isCreator = room.createdBy && room.createdBy.toString() === req.user.id;
-      const isAdmin = isCreator || (room.admins || []).some((a) => a.toString() === req.user.id);
+      const isAdmin = isAdminOf(room, req.user.id);
       const isMember = !room.isRestricted
         || isAdmin
         || (room.members || []).some((m) => m.toString() === req.user.id);
@@ -83,7 +93,7 @@ router.patch('/:roomId', requireAuth, async (req, res) => {
     if (!room) {
       return res.status(404).json({ error: 'Room not found' });
     }
-    if (!room.admins.some((a) => a.toString() === req.user.id)) {
+    if (!isAdminOf(room, req.user.id)) {
       return res.status(403).json({ error: 'Only a room admin can rename this room' });
     }
 
@@ -117,12 +127,12 @@ router.post('/:roomId/admins/:userId', requireAuth, async (req, res) => {
     if (!room) {
       return res.status(404).json({ error: 'Room not found' });
     }
-    if (!room.admins.some((a) => a.toString() === req.user.id)) {
+    if (!isAdminOf(room, req.user.id)) {
       return res.status(403).json({ error: 'Only a room admin can promote a new admin' });
     }
 
     const { userId } = req.params;
-    if (room.admins.some((a) => a.toString() === userId)) {
+    if (isAdminOf(room, userId)) {
       return res.status(400).json({ error: 'That user is already an admin' });
     }
 
@@ -155,7 +165,7 @@ router.delete('/:roomId/admins/:userId', requireAuth, async (req, res) => {
     if (!room) {
       return res.status(404).json({ error: 'Room not found' });
     }
-    if (!room.admins.some((a) => a.toString() === req.user.id)) {
+    if (!isAdminOf(room, req.user.id)) {
       return res.status(403).json({ error: 'Only a room admin can demote another admin' });
     }
 
@@ -188,7 +198,7 @@ router.delete('/:roomId', requireAuth, async (req, res) => {
     if (!room) {
       return res.status(404).json({ error: 'Room not found' });
     }
-    if (!room.admins.some((a) => a.toString() === req.user.id)) {
+    if (!isAdminOf(room, req.user.id)) {
       return res.status(403).json({ error: 'Only a room admin can delete this room' });
     }
 
@@ -258,7 +268,7 @@ router.get('/:roomId/requests', requireAuth, async (req, res) => {
     if (!room) {
       return res.status(404).json({ error: 'Room not found' });
     }
-    if (!room.admins.some((a) => a.toString() === req.user.id)) {
+    if (!isAdminOf(room, req.user.id)) {
       return res.status(403).json({ error: 'Only a room admin can view join requests' });
     }
 
@@ -277,7 +287,7 @@ router.post('/:roomId/requests/:userId/approve', requireAuth, async (req, res) =
     if (!room) {
       return res.status(404).json({ error: 'Room not found' });
     }
-    if (!room.admins.some((a) => a.toString() === req.user.id)) {
+    if (!isAdminOf(room, req.user.id)) {
       return res.status(403).json({ error: 'Only a room admin can approve join requests' });
     }
 
@@ -308,7 +318,7 @@ router.post('/:roomId/requests/:userId/deny', requireAuth, async (req, res) => {
     if (!room) {
       return res.status(404).json({ error: 'Room not found' });
     }
-    if (!room.admins.some((a) => a.toString() === req.user.id)) {
+    if (!isAdminOf(room, req.user.id)) {
       return res.status(403).json({ error: 'Only a room admin can deny join requests' });
     }
 
@@ -341,9 +351,8 @@ router.get('/:roomId/messages', requireAuth, async (req, res) => {
       return res.status(404).json({ error: 'Room not found' });
     }
     if (room.isRestricted) {
-      const isAdmin = (room.admins || []).some((a) => a.toString() === req.user.id);
       const isMember = room.members.some((m) => m.toString() === req.user.id);
-      if (!isAdmin && !isMember) {
+      if (!isAdminOf(room, req.user.id) && !isMember) {
         return res.status(403).json({ error: 'This room requires the creator\'s approval to join' });
       }
     }
