@@ -107,6 +107,12 @@ function initSocket(io) {
     io.to(roomId).emit('presence_update', getOnlineUsers(roomId));
   };
 
+  // Lets REST route handlers (via req.app.get('io')) read who is CURRENTLY
+  // online in a room, without needing their own copy of the presence map.
+  // Used when converting a room to restricted, to grandfather in everyone
+  // currently present at the moment of the toggle.
+  io.getOnlineUserIds = (roomId) => getOnlineUsers(roomId).map((u) => u.userId);
+
   io.on('connection', (socket) => {
     console.log(`Socket connected: ${socket.id} (${socket.user.username})`);
 

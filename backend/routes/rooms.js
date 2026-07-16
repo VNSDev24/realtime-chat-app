@@ -345,6 +345,78 @@ router.delete('/:roomId', requireAuth, async (req, res) => {
   }
 });
 
+// POST /api/rooms/:roomId/restrict - converts an open room to approval-required.
+// Allowed for creator or any admin. Grandfathers in everyone currently using
+// the room (online right now, OR has ever sent a message in it) as a member,
+// so no one actively participating gets locked out by this change.
+router.post('/:roomId/restrict', requireAuth, async (req, res) => {
+  try {
+    const room = await Room.findById(req.params.roomId);
+    if (!room) {
+      return res.status(404).json({ error: 'Room not found' });
+    }
+    if (!isAdminOf(room, req.user.id)) {
+      return res.status(403).json({ error: 'Only a room admin can restrict this room' });
+    }
+    if (room.isRestricted) {
+      return res.status(400).json({ error: 'This room is already restricted' });
+    }
+
+    const io = req.app.get('io');
+    const onlineUserIds = io ? io.getOnlineUserIds(room._id.toString()) : [];
+    const pastSenderIds = (await Message.distinct('sender', { room: room._id })).map((id) => id.toString());
+    const existingMemberIds = room.members.map((m) => m.toString());
+
+    const memberSet = new Set([...existingMemberIds, ...onlineUserIds, ...pastSenderIds]);
+    room.members = Array.from(memberSet);
+    room.isRestricted = true;
+    await room.save();
+
+    if (io) {
+      io.to(room._id.toString()).emit('room_restricted', { roomId: room._id, roomName: room.name });
+    }
+
+    res.json(room);
+  } catch (err) {
+    console.error('Restrict room error:', err.message);
+    res.status(500).json({ error: 'Failed to restrict room' });
+  }
+});
+
+// POST /api/rooms/:roomId/unrestrict - converts a restricted room back to open.
+// Allowed for creator or any admin. Clears pending join requests, since
+// "requests to join" become meaningless once anyone can join freely again.
+// Does NOT touch blockedUsers — blocking remains in effect regardless of the
+// room's restriction status, by design.
+router.post('/:roomId/unrestrict', requireAuth, async (req, res) => {
+  try {
+    const room = await Room.findById(req.params.roomId);
+    if (!room) {
+      return res.status(404).json({ error: 'Room not found' });
+    }
+    if (!isAdminOf(room, req.user.id)) {
+      return res.status(403).json({ error: 'Only a room admin can open this room' });
+    }
+    if (!room.isRestricted) {
+      return res.status(400).json({ error: 'This room is not currently restricted' });
+    }
+
+    room.isRestricted = false;
+    room.pendingRequests = [];
+    await room.save();
+
+    const io = req.app.get('io');
+    if (io) {
+      io.to(room._id.toString()).emit('room_unrestricted', { roomId: room._id, roomName: room.name });
+    }
+
+    res.json(room);
+  } catch (err) {
+    console.error('Unrestrict room error:', err.message);
+    res.status(500).json({ error: 'Failed to open room' });
+  }
+});
+
 // POST /api/rooms/:roomId/request-join - ask the creator for access to a restricted room
 router.post('/:roomId/request-join', requireAuth, async (req, res) => {
   try {

@@ -425,3 +425,12 @@ body {
   text-decoration: none; margin-top: 10px;
 }
 #register-resend-otp-link:hover { text-decoration: underline; }
+
+/* ---------- Restrict/Open room toggle ---------- */
+.restrict-toggle-btn {
+  background: var(--panel-light); color: var(--text); border: 1px solid var(--border);
+  border-radius: 6px; padding: 6px 12px; font-size: 12px; font-weight: 600; cursor: pointer;
+  flex-shrink: 0;
+}
+.restrict-toggle-btn:hover { background: var(--border); }
+.restrict-toggle-btn.hidden { display: none; }

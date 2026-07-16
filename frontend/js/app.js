@@ -79,6 +79,7 @@ const onlineUsersDropdown = document.getElementById('online-users-dropdown');
 const onlineUsersList = document.getElementById('online-users-list');
 const deleteRoomBtn = document.getElementById('delete-room-btn');
 const blockedUsersBtn = document.getElementById('blocked-users-btn');
+const restrictToggleBtn = document.getElementById('restrict-toggle-btn');
 const messagesEl = document.getElementById('messages');
 const typingIndicatorEl = document.getElementById('typing-indicator');
 const messageForm = document.getElementById('message-form');
@@ -624,6 +625,20 @@ function connectSocket() {
     }
   });
 
+  // A room's approval requirement changed live (toggled by an admin, possibly
+  // in another tab). Refresh the room list so the lock icon, "Request to
+  // Join" state, and the header toggle button all reflect the new state
+  // immediately — for anyone currently in the room OR who has it in view.
+  socket.on('room_restricted', ({ roomId }) => {
+    if (roomId === activeRoomId) renderSystemNote('This room now requires approval to join.');
+    loadRooms();
+  });
+
+  socket.on('room_unrestricted', ({ roomId }) => {
+    if (roomId === activeRoomId) renderSystemNote('This room is now open to everyone.');
+    loadRooms();
+  });
+
   socket.on('user_joined', ({ username }) => {
     renderSystemNote(`${username} joined the room`);
   });
@@ -678,6 +693,7 @@ function connectSocket() {
       resetPresenceDropdown();
       deleteRoomBtn.classList.add('hidden');
       blockedUsersBtn.classList.add('hidden');
+      restrictToggleBtn.classList.add('hidden');
       alert(`This room ("${roomName}") was deleted by an admin.`);
     }
     loadRooms();
@@ -693,6 +709,7 @@ function connectSocket() {
       resetPresenceDropdown();
       deleteRoomBtn.classList.add('hidden');
       blockedUsersBtn.classList.add('hidden');
+      restrictToggleBtn.classList.add('hidden');
       alert(`You have been blocked from "${roomName}" by an admin.`);
     }
     loadRooms();
@@ -806,14 +823,51 @@ async function loadRooms() {
     selectRoom(firstJoinableRoom._id, firstJoinableRoom.name);
   }
 
-  // Keep the Delete Room / Blocked Users buttons in sync even if admin status
-  // changed for the CURRENTLY active room without switching rooms (e.g. just got promoted).
+  // Keep the Delete Room / Blocked Users / Restrict buttons in sync even if
+  // admin status or restriction state changed for the CURRENTLY active room
+  // without switching rooms (e.g. just got promoted, or someone else toggled it).
   if (activeRoomId && roomsById[activeRoomId]) {
     const isAdmin = roomsById[activeRoomId].isAdmin;
     deleteRoomBtn.classList.toggle('hidden', !isAdmin);
     blockedUsersBtn.classList.toggle('hidden', !isAdmin);
+    updateRestrictToggleBtn(roomsById[activeRoomId]);
   }
 }
+
+// Shows/hides the restrict/open toggle (admin only) and sets its label and
+// action based on the room's CURRENT restriction state.
+function updateRestrictToggleBtn(room) {
+  const isAdmin = Boolean(room && room.isAdmin);
+  restrictToggleBtn.classList.toggle('hidden', !isAdmin);
+  if (!isAdmin) return;
+
+  if (room.isRestricted) {
+    restrictToggleBtn.textContent = '🔓 Open Room';
+    restrictToggleBtn.dataset.action = 'unrestrict';
+  } else {
+    restrictToggleBtn.textContent = '🔒 Restrict Room';
+    restrictToggleBtn.dataset.action = 'restrict';
+  }
+}
+
+restrictToggleBtn.addEventListener('click', async () => {
+  if (!activeRoomId) return;
+  const action = restrictToggleBtn.dataset.action;
+
+  const confirmed = action === 'restrict'
+    ? confirm('Make this room approval-required? Everyone currently online or who has previously posted here will keep access. Anyone new will need to request approval to join.')
+    : confirm('Open this room back up? Anyone will be able to join freely again. Blocked users will remain blocked regardless.');
+  if (!confirmed) return;
+
+  try {
+    const res = await apiFetch(`/rooms/${activeRoomId}/${action}`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `Failed to ${action} room`);
+    await loadRooms();
+  } catch (err) {
+    alert(err.message);
+  }
+});
 
 async function handleRequestJoin(roomId) {
   try {
@@ -1147,6 +1201,7 @@ async function selectRoom(roomId, roomName) {
   const room = roomsById[roomId];
   deleteRoomBtn.classList.toggle('hidden', !(room && room.isAdmin));
   blockedUsersBtn.classList.toggle('hidden', !(room && room.isAdmin));
+  updateRestrictToggleBtn(room);
 
   socket.emit('join_room', { roomId });
 
