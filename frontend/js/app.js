@@ -86,6 +86,12 @@ const typingIndicatorEl = document.getElementById('typing-indicator');
 const messageForm = document.getElementById('message-form');
 const messageInput = document.getElementById('message-input');
 const sendBtn = document.getElementById('send-btn');
+const emojiBtn = document.getElementById('emoji-btn');
+const emojiPopover = document.getElementById('emoji-popover');
+const emojiTabsEl = document.getElementById('emoji-tabs');
+const emojiGridEl = document.getElementById('emoji-grid');
+const micBtn = document.getElementById('mic-btn');
+const micErrorMsg = document.getElementById('mic-error-msg');
 
 const currentUsernameEl = document.getElementById('current-username');
 const logoutBtn = document.getElementById('logout-btn');
@@ -136,6 +142,147 @@ expandSidebarBtn.addEventListener('click', () => applySidebarCollapsed(false));
 
 // Apply saved preference immediately (defaults to expanded if none saved)
 applySidebarCollapsed(localStorage.getItem('chat_sidebar_collapsed') === '1');
+
+// ---------- Emoji picker ----------
+// A small, curated, self-hosted set — plain Unicode characters, no images,
+// no external library or CDN. Deliberately avoids repeating the cdn.socket.io
+// lesson from earlier in this project: no new external dependency for
+// something this replaceable.
+const EMOJI_CATEGORIES = {
+  'Smileys': ['😀','😃','😄','😁','😆','😅','😂','🤣','😊','😇','🙂','🙃','😉','😌','😍','🥰','😘','😗','😙','😚','😋','😛','😝','😜','🤪','🤨','🧐','🤓','😎','🥳','😏','😒','😞','😔','😟','😕','🙁','☹️','😣','😖','😫','😩','🥺','😢','😭','😤','😠','😡','🤬','🤯','😳','🥵','🥶','😱','😨','😰','😥','😓','🤗','🤔','🤭','🤫','🤥','😶','😐','😑','😬','🙄','😯','😦','😧','😮','😲','😴','🤤','😪','😵','🤐','🥴','🤢','🤮','🤧','😷','🤒','🤕'],
+  'Gestures': ['👍','👎','👌','✌️','🤞','🤟','🤘','🤙','👈','👉','👆','👇','☝️','✋','🤚','🖐️','🖖','👋','🤝','👏','🙌','👐','🤲','🙏','✊','👊','🤛','🤜','💪','🦾','🖕','✍️','🤳'],
+  'Hearts': ['❤️','🧡','💛','💚','💙','💜','🖤','🤍','🤎','💔','❣️','💕','💞','💓','💗','💖','💘','💝','💟','♥️'],
+  'Animals & Nature': ['🐶','🐱','🐭','🐹','🐰','🦊','🐻','🐼','🐨','🐯','🦁','🐮','🐷','🐸','🐵','🐔','🐧','🐦','🐤','🦆','🦅','🦉','🐺','🐗','🐴','🦄','🐝','🐛','🦋','🐌','🐞','🐢','🐍','🦖','🐙','🐬','🐳','🐘','🦒','🌸','🌻','🌼','🌷','🌹','🍀','🌈','☀️','⭐','🌙'],
+  'Food': ['🍏','🍎','🍊','🍋','🍌','🍉','🍇','🍓','🍒','🍑','🥭','🍍','🥥','🥝','🍅','🥑','🍕','🍔','🍟','🌭','🍿','🧂','🥓','🥚','🍳','🥞','🧇','🍞','🥐','🧀','🍗','🍖','🥩','🌮','🌯','🍝','🍜','🍣','🍩','🍪','🎂','🍰','🧁','🍫','🍬','🍭','☕','🍵','🥤','🍺','🍷'],
+  'Objects': ['⚽','🏀','🏈','⚾','🎾','🏐','🎱','🏓','🎮','🎲','🎧','🎸','🎹','🎨','📷','💻','📱','⌚','💡','🔦','📚','✏️','📌','🔒','🔑','🎁','🎉','🎈','🏆','💯','🔥','✨','💤','💬','👀']
+};
+
+let currentEmojiCategory = 'Smileys';
+
+function renderEmojiTabs() {
+  emojiTabsEl.innerHTML = '';
+  Object.keys(EMOJI_CATEGORIES).forEach((category) => {
+    const tab = document.createElement('button');
+    tab.type = 'button';
+    tab.className = 'emoji-tab' + (category === currentEmojiCategory ? ' active' : '');
+    tab.textContent = EMOJI_CATEGORIES[category][0]; // use the category's first emoji as its tab icon
+    tab.title = category;
+    tab.addEventListener('click', () => {
+      currentEmojiCategory = category;
+      renderEmojiTabs();
+      renderEmojiGrid();
+    });
+    emojiTabsEl.appendChild(tab);
+  });
+}
+
+function renderEmojiGrid() {
+  emojiGridEl.innerHTML = '';
+  EMOJI_CATEGORIES[currentEmojiCategory].forEach((emoji) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'emoji-item';
+    btn.textContent = emoji;
+    btn.addEventListener('click', () => insertEmojiAtCursor(emoji));
+    emojiGridEl.appendChild(btn);
+  });
+}
+
+// Inserts at the current cursor position (not just appended to the end), so
+// picking an emoji mid-sentence works the way anyone would expect.
+function insertEmojiAtCursor(emoji) {
+  const start = messageInput.selectionStart ?? messageInput.value.length;
+  const end = messageInput.selectionEnd ?? messageInput.value.length;
+  const before = messageInput.value.slice(0, start);
+  const after = messageInput.value.slice(end);
+  messageInput.value = before + emoji + after;
+
+  const newCursorPos = start + emoji.length;
+  messageInput.focus();
+  messageInput.setSelectionRange(newCursorPos, newCursorPos);
+}
+
+emojiBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  emojiPopover.classList.toggle('hidden');
+});
+
+document.addEventListener('click', (e) => {
+  if (!emojiPopover.contains(e.target) && e.target !== emojiBtn) {
+    emojiPopover.classList.add('hidden');
+  }
+});
+
+renderEmojiTabs();
+renderEmojiGrid();
+
+// ---------- Speech-to-text (microphone dictation) ----------
+// Uses the browser's built-in Web Speech API — no audio is sent to our own
+// backend. In Chrome/Edge, transcription happens via the browser vendor's
+// speech servers (standard browser behavior, not something specific to this
+// app). Firefox and some Safari versions don't implement this API at all;
+// the button is hidden entirely for them rather than shown broken.
+const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
+let recognition = null;
+let isListening = false;
+
+if (SpeechRecognitionAPI) {
+  micBtn.classList.remove('hidden');
+
+  recognition = new SpeechRecognitionAPI();
+  recognition.continuous = false;
+  recognition.interimResults = true;
+  recognition.lang = 'en-US';
+
+  let baseText = ''; // message input's text before this dictation session started
+
+  recognition.addEventListener('start', () => {
+    isListening = true;
+    micBtn.classList.add('listening');
+    micErrorMsg.classList.add('hidden');
+    baseText = messageInput.value ? messageInput.value + ' ' : '';
+  });
+
+  recognition.addEventListener('result', (event) => {
+    let transcript = '';
+    for (let i = 0; i < event.results.length; i++) {
+      transcript += event.results[i][0].transcript;
+    }
+    messageInput.value = baseText + transcript;
+  });
+
+  recognition.addEventListener('end', () => {
+    isListening = false;
+    micBtn.classList.remove('listening');
+  });
+
+  recognition.addEventListener('error', (event) => {
+    isListening = false;
+    micBtn.classList.remove('listening');
+
+    if (event.error === 'not-allowed' || event.error === 'permission-denied') {
+      micErrorMsg.textContent = 'Microphone access denied — enable it in your browser\'s site settings to use dictation.';
+    } else if (event.error === 'no-speech') {
+      micErrorMsg.textContent = 'No speech detected — try again.';
+    } else {
+      micErrorMsg.textContent = 'Dictation failed. Please try again.';
+    }
+    micErrorMsg.classList.remove('hidden');
+  });
+
+  micBtn.addEventListener('click', () => {
+    if (isListening) {
+      recognition.stop();
+    } else {
+      // The browser's own native permission prompt IS the consent step here —
+      // no separate custom dialog is shown before this, since one would just
+      // duplicate what the browser already asks.
+      recognition.start();
+    }
+  });
+}
+// If SpeechRecognitionAPI is unsupported, micBtn simply stays hidden
+// (it already has the `hidden` class by default in the HTML).
 
 // ---------- Auth tab switching ----------
 tabLogin.addEventListener('click', () => setAuthMode('login'));

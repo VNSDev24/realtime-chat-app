@@ -13,7 +13,7 @@
 <body>
 
   <button id="theme-toggle-btn" title="Toggle light/dark theme">🌙</button>
-  <div id="app-version" class="app-version">v1.13.0</div>
+  <div id="app-version" class="app-version">v1.14.0</div>
 
   <!-- Auth screen -->
   <section id="auth-screen" class="screen">
@@ -127,9 +127,18 @@
       <div id="typing-indicator" class="typing-indicator"></div>
 
       <form id="message-form" class="message-form hidden">
+        <div class="emoji-picker-wrapper">
+          <button type="button" id="emoji-btn" title="Add emoji">😊</button>
+          <div id="emoji-popover" class="emoji-popover hidden">
+            <div id="emoji-tabs" class="emoji-tabs"></div>
+            <div id="emoji-grid" class="emoji-grid"></div>
+          </div>
+        </div>
+        <button type="button" id="mic-btn" class="hidden" title="Dictate message">🎤</button>
         <input type="text" id="message-input" placeholder="Type a message..." autocomplete="off" disabled />
         <button type="submit" id="send-btn" disabled>Send</button>
       </form>
+      <p id="mic-error-msg" class="mic-error-msg hidden"></p>
     </main>
   </section>
 
