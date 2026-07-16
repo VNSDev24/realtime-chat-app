@@ -80,6 +80,7 @@ const onlineUsersList = document.getElementById('online-users-list');
 const deleteRoomBtn = document.getElementById('delete-room-btn');
 const blockedUsersBtn = document.getElementById('blocked-users-btn');
 const restrictToggleBtn = document.getElementById('restrict-toggle-btn');
+const emptyStateEl = document.getElementById('empty-state');
 const messagesEl = document.getElementById('messages');
 const typingIndicatorEl = document.getElementById('typing-indicator');
 const messageForm = document.getElementById('message-form');
@@ -89,6 +90,9 @@ const sendBtn = document.getElementById('send-btn');
 const currentUsernameEl = document.getElementById('current-username');
 const logoutBtn = document.getElementById('logout-btn');
 const themeToggleBtn = document.getElementById('theme-toggle-btn');
+const collapseSidebarBtn = document.getElementById('collapse-sidebar-btn');
+const expandSidebarBtn = document.getElementById('expand-sidebar-btn');
+const chatScreenSection = document.getElementById('chat-screen');
 
 // Profile screen refs
 const profileScreen = document.getElementById('profile-screen');
@@ -119,6 +123,19 @@ themeToggleBtn.addEventListener('click', () => {
 
 // Apply saved preference immediately (defaults to the original dark theme if none saved)
 applyTheme(localStorage.getItem('chat_theme') || 'dark');
+
+// ---------- Sidebar collapse/expand ----------
+function applySidebarCollapsed(collapsed) {
+  chatScreenSection.classList.toggle('sidebar-collapsed', collapsed);
+  expandSidebarBtn.classList.toggle('hidden', !collapsed);
+  localStorage.setItem('chat_sidebar_collapsed', collapsed ? '1' : '0');
+}
+
+collapseSidebarBtn.addEventListener('click', () => applySidebarCollapsed(true));
+expandSidebarBtn.addEventListener('click', () => applySidebarCollapsed(false));
+
+// Apply saved preference immediately (defaults to expanded if none saved)
+applySidebarCollapsed(localStorage.getItem('chat_sidebar_collapsed') === '1');
 
 // ---------- Auth tab switching ----------
 tabLogin.addEventListener('click', () => setAuthMode('login'));
@@ -688,12 +705,7 @@ function connectSocket() {
   socket.on('room_deleted', ({ roomId, roomName }) => {
     if (roomId === activeRoomId) {
       activeRoomId = null;
-      messagesEl.innerHTML = '';
-      activeRoomNameEl.textContent = 'Select a room';
-      resetPresenceDropdown();
-      deleteRoomBtn.classList.add('hidden');
-      blockedUsersBtn.classList.add('hidden');
-      restrictToggleBtn.classList.add('hidden');
+      showEmptyState();
       alert(`This room ("${roomName}") was deleted by an admin.`);
     }
     loadRooms();
@@ -704,12 +716,7 @@ function connectSocket() {
   socket.on('room_blocked', ({ roomId, roomName }) => {
     if (roomId === activeRoomId) {
       activeRoomId = null;
-      messagesEl.innerHTML = '';
-      activeRoomNameEl.textContent = 'Select a room';
-      resetPresenceDropdown();
-      deleteRoomBtn.classList.add('hidden');
-      blockedUsersBtn.classList.add('hidden');
-      restrictToggleBtn.classList.add('hidden');
+      showEmptyState();
       alert(`You have been blocked from "${roomName}" by an admin.`);
     }
     loadRooms();
@@ -1179,9 +1186,47 @@ function updateRoomBadge(roomId) {
   }
 }
 
+// Shows the friendly "no room selected" view — used both before any room has
+// ever been picked, and after leaving a room via Escape.
+function showEmptyState() {
+  emptyStateEl.classList.remove('hidden');
+  messagesEl.classList.add('hidden');
+  messageForm.classList.add('hidden');
+  messagesEl.innerHTML = '';
+  typingIndicatorEl.textContent = '';
+  activeRoomNameEl.textContent = 'Select a room';
+  activeRoomNameEl.title = '';
+  messageInput.disabled = true;
+  sendBtn.disabled = true;
+  resetPresenceDropdown();
+  deleteRoomBtn.classList.add('hidden');
+  blockedUsersBtn.classList.add('hidden');
+  restrictToggleBtn.classList.add('hidden');
+  document.querySelectorAll('#room-list li').forEach((li) => li.classList.remove('active'));
+}
+
+// Shows the actual chat view — used whenever a room is selected.
+function showActiveRoomView() {
+  emptyStateEl.classList.add('hidden');
+  messagesEl.classList.remove('hidden');
+  messageForm.classList.remove('hidden');
+}
+
+// Pressing Escape closes the currently open room: actually leaves its live
+// Socket.io session (so other members' presence stays accurate — see
+// leave_room on the backend) and returns to the friendly empty-state view.
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || !activeRoomId) return;
+  if (socket) socket.emit('leave_room');
+  activeRoomId = null;
+  showEmptyState();
+});
+
 async function selectRoom(roomId, roomName) {
   activeRoomId = roomId;
   activeRoomName = roomName;
+
+  showActiveRoomView();
 
   // Entering a room clears its unread badge, since its messages are now being viewed.
   unreadCounts.set(roomId, 0);

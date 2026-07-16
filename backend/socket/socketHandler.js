@@ -146,6 +146,20 @@ function initSocket(io) {
       io.to(roomId).emit('presence_update', getOnlineUsers(roomId));
     });
 
+    // Leaves the current room WITHOUT joining a different one afterward —
+    // used when the user presses Escape to close the chat, rather than
+    // switching directly to another room (join_room handles that case by
+    // leaving the previous room as a side effect, but assumes a new room
+    // follows immediately, which isn't true here).
+    socket.on('leave_room', () => {
+      if (!currentRoomId) return;
+      socket.leave(currentRoomId);
+      removePresence(currentRoomId, socket.id);
+      socket.to(currentRoomId).emit('user_left', { username: socket.user.username });
+      io.to(currentRoomId).emit('presence_update', getOnlineUsers(currentRoomId));
+      currentRoomId = null;
+    });
+
     socket.on('send_message', async ({ roomId, text }) => {
       try {
         if (!roomId || !text || !text.trim()) return;

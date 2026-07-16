@@ -434,3 +434,35 @@ body {
 }
 .restrict-toggle-btn:hover { background: var(--border); }
 .restrict-toggle-btn.hidden { display: none; }
+
+/* ---------- Sidebar collapse/expand ---------- */
+.sidebar-header-actions { display: flex; align-items: center; gap: 6px; }
+#collapse-sidebar-btn {
+  width: 22px; height: 22px; border-radius: 6px; border: 1px solid var(--border);
+  background: var(--panel-light); color: var(--text-dim); font-size: 12px; cursor: pointer;
+}
+#collapse-sidebar-btn:hover { background: var(--border); color: var(--text); }
+
+#chat-screen.sidebar-collapsed .sidebar { display: none; }
+
+.expand-sidebar-btn {
+  position: fixed; left: 0; top: 50%; transform: translateY(-50%); z-index: 500;
+  width: 20px; height: 56px; border: 1px solid var(--border); border-left: none;
+  border-radius: 0 8px 8px 0; background: var(--panel); color: var(--text-dim);
+  font-size: 13px; cursor: pointer; display: flex; align-items: center; justify-content: center;
+}
+.expand-sidebar-btn:hover { background: var(--panel-light); color: var(--text); }
+.expand-sidebar-btn.hidden { display: none; }
+
+/* ---------- Empty state (no room selected / left via Escape) ---------- */
+.empty-state {
+  flex: 1; display: flex; align-items: center; justify-content: center;
+  color: var(--text-dim); font-size: 15px; text-align: center; padding: 40px;
+}
+.empty-state.hidden { display: none; }
+
+/* ---------- App version label ---------- */
+.app-version {
+  position: fixed; bottom: 10px; right: 14px; z-index: 100;
+  font-size: 11px; color: var(--text-dim); opacity: 0.6; pointer-events: none;
+}
