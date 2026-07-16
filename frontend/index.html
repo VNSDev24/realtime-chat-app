@@ -13,7 +13,7 @@
 <body>
 
   <button id="theme-toggle-btn" title="Toggle light/dark theme">🌙</button>
-  <div id="app-version" class="app-version">v1.14.0</div>
+  <div id="app-version" class="app-version">v1.15.0</div>
 
   <!-- Auth screen -->
   <section id="auth-screen" class="screen">
@@ -130,8 +130,10 @@
         <div class="emoji-picker-wrapper">
           <button type="button" id="emoji-btn" title="Add emoji">😊</button>
           <div id="emoji-popover" class="emoji-popover hidden">
+            <input type="text" id="emoji-search-input" class="emoji-search-input" placeholder="Search emoji..." autocomplete="off" />
             <div id="emoji-tabs" class="emoji-tabs"></div>
             <div id="emoji-grid" class="emoji-grid"></div>
+            <p id="emoji-no-results" class="emoji-no-results hidden">No emoji found.</p>
           </div>
         </div>
         <button type="button" id="mic-btn" class="hidden" title="Dictate message">🎤</button>

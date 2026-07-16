@@ -90,6 +90,8 @@ const emojiBtn = document.getElementById('emoji-btn');
 const emojiPopover = document.getElementById('emoji-popover');
 const emojiTabsEl = document.getElementById('emoji-tabs');
 const emojiGridEl = document.getElementById('emoji-grid');
+const emojiSearchInput = document.getElementById('emoji-search-input');
+const emojiNoResults = document.getElementById('emoji-no-results');
 const micBtn = document.getElementById('mic-btn');
 const micErrorMsg = document.getElementById('mic-error-msg');
 
@@ -149,12 +151,12 @@ applySidebarCollapsed(localStorage.getItem('chat_sidebar_collapsed') === '1');
 // lesson from earlier in this project: no new external dependency for
 // something this replaceable.
 const EMOJI_CATEGORIES = {
-  'Smileys': ['😀','😃','😄','😁','😆','😅','😂','🤣','😊','😇','🙂','🙃','😉','😌','😍','🥰','😘','😗','😙','😚','😋','😛','😝','😜','🤪','🤨','🧐','🤓','😎','🥳','😏','😒','😞','😔','😟','😕','🙁','☹️','😣','😖','😫','😩','🥺','😢','😭','😤','😠','😡','🤬','🤯','😳','🥵','🥶','😱','😨','😰','😥','😓','🤗','🤔','🤭','🤫','🤥','😶','😐','😑','😬','🙄','😯','😦','😧','😮','😲','😴','🤤','😪','😵','🤐','🥴','🤢','🤮','🤧','😷','🤒','🤕'],
-  'Gestures': ['👍','👎','👌','✌️','🤞','🤟','🤘','🤙','👈','👉','👆','👇','☝️','✋','🤚','🖐️','🖖','👋','🤝','👏','🙌','👐','🤲','🙏','✊','👊','🤛','🤜','💪','🦾','🖕','✍️','🤳'],
-  'Hearts': ['❤️','🧡','💛','💚','💙','💜','🖤','🤍','🤎','💔','❣️','💕','💞','💓','💗','💖','💘','💝','💟','♥️'],
-  'Animals & Nature': ['🐶','🐱','🐭','🐹','🐰','🦊','🐻','🐼','🐨','🐯','🦁','🐮','🐷','🐸','🐵','🐔','🐧','🐦','🐤','🦆','🦅','🦉','🐺','🐗','🐴','🦄','🐝','🐛','🦋','🐌','🐞','🐢','🐍','🦖','🐙','🐬','🐳','🐘','🦒','🌸','🌻','🌼','🌷','🌹','🍀','🌈','☀️','⭐','🌙'],
-  'Food': ['🍏','🍎','🍊','🍋','🍌','🍉','🍇','🍓','🍒','🍑','🥭','🍍','🥥','🥝','🍅','🥑','🍕','🍔','🍟','🌭','🍿','🧂','🥓','🥚','🍳','🥞','🧇','🍞','🥐','🧀','🍗','🍖','🥩','🌮','🌯','🍝','🍜','🍣','🍩','🍪','🎂','🍰','🧁','🍫','🍬','🍭','☕','🍵','🥤','🍺','🍷'],
-  'Objects': ['⚽','🏀','🏈','⚾','🎾','🏐','🎱','🏓','🎮','🎲','🎧','🎸','🎹','🎨','📷','💻','📱','⌚','💡','🔦','📚','✏️','📌','🔒','🔑','🎁','🎉','🎈','🏆','💯','🔥','✨','💤','💬','👀']
+  'Smileys': [{ e: '😀', k: 'grinning happy smile' }, { e: '😃', k: 'happy smile joy' }, { e: '😄', k: 'happy laugh smile' }, { e: '😁', k: 'grin happy smile' }, { e: '😆', k: 'laugh happy haha' }, { e: '😅', k: 'sweat laugh nervous relief' }, { e: '😂', k: 'laugh cry funny lol' }, { e: '🤣', k: 'rofl laugh funny hilarious' }, { e: '😊', k: 'smile happy blush' }, { e: '😇', k: 'angel innocent halo' }, { e: '🙂', k: 'smile slight' }, { e: '🙃', k: 'upside down silly' }, { e: '😉', k: 'wink flirt' }, { e: '😌', k: 'relieved calm content' }, { e: '😍', k: 'love heart eyes crush' }, { e: '🥰', k: 'love adore hearts' }, { e: '😘', k: 'kiss love' }, { e: '😗', k: 'kiss whistle' }, { e: '😙', k: 'kiss smile' }, { e: '😚', k: 'kiss closed eyes' }, { e: '😋', k: 'yum delicious tasty tongue' }, { e: '😛', k: 'tongue playful silly' }, { e: '😝', k: 'tongue silly wink' }, { e: '😜', k: 'wink tongue silly crazy' }, { e: '🤪', k: 'crazy wild goofy' }, { e: '🤨', k: 'skeptical suspicious raised eyebrow' }, { e: '🧐', k: 'monocle curious inspect' }, { e: '🤓', k: 'nerd glasses geek' }, { e: '😎', k: 'cool sunglasses awesome' }, { e: '🥳', k: 'party celebrate birthday' }, { e: '😏', k: 'smirk sly confident' }, { e: '😒', k: 'unamused annoyed meh' }, { e: '😞', k: 'sad disappointed' }, { e: '😔', k: 'sad pensive down' }, { e: '😟', k: 'worried concerned' }, { e: '😕', k: 'confused unsure' }, { e: '🙁', k: 'sad frown' }, { e: '☹️', k: 'sad frown upset' }, { e: '😣', k: 'persevere struggle frustrated' }, { e: '😖', k: 'confounded distress' }, { e: '😫', k: 'tired exhausted fed up' }, { e: '😩', k: 'tired weary exhausted' }, { e: '🥺', k: 'pleading puppy eyes sad' }, { e: '😢', k: 'cry sad tear' }, { e: '😭', k: 'crying sob sad tears' }, { e: '😤', k: 'frustrated huff proud steam' }, { e: '😠', k: 'angry mad' }, { e: '😡', k: 'angry rage mad furious' }, { e: '🤬', k: 'angry curse swearing' }, { e: '🤯', k: 'mind blown shocked' }, { e: '😳', k: 'flushed embarrassed shocked' }, { e: '🥵', k: 'hot sweating overheated' }, { e: '🥶', k: 'cold freezing' }, { e: '😱', k: 'scream shocked scared' }, { e: '😨', k: 'fearful scared afraid' }, { e: '😰', k: 'anxious nervous sweat' }, { e: '😥', k: 'sad relieved disappointed' }, { e: '😓', k: 'sweat nervous tired' }, { e: '🤗', k: 'hug welcome warm' }, { e: '🤔', k: 'thinking hmm ponder' }, { e: '🤭', k: 'giggle oops shy' }, { e: '🤫', k: 'shush quiet secret' }, { e: '🤥', k: 'lying pinocchio nose' }, { e: '😶', k: 'speechless quiet no mouth' }, { e: '😐', k: 'neutral blank' }, { e: '😑', k: 'expressionless blank annoyed' }, { e: '😬', k: 'grimace awkward yikes' }, { e: '🙄', k: 'eye roll annoyed sarcastic' }, { e: '😯', k: 'surprised gasp' }, { e: '😦', k: 'frown open mouth shock' }, { e: '😧', k: 'anguished shocked' }, { e: '😮', k: 'surprised open mouth wow' }, { e: '😲', k: 'astonished shocked wow' }, { e: '😴', k: 'sleep tired zzz' }, { e: '🤤', k: 'drool sleepy hungry' }, { e: '😪', k: 'sleepy tired' }, { e: '😵', k: 'dizzy confused knocked out' }, { e: '🤐', k: 'zipper mouth quiet secret' }, { e: '🥴', k: 'woozy dizzy drunk' }, { e: '🤢', k: 'sick nauseous gross' }, { e: '🤮', k: 'vomit sick gross' }, { e: '🤧', k: 'sneeze sick allergy' }, { e: '😷', k: 'mask sick ill' }, { e: '🤒', k: 'sick thermometer fever' }, { e: '🤕', k: 'hurt bandage injured' }],
+  'Gestures': [{ e: '👍', k: 'thumbs up good yes approve' }, { e: '👎', k: 'thumbs down bad no disapprove' }, { e: '👌', k: 'ok perfect' }, { e: '✌️', k: 'peace victory' }, { e: '🤞', k: 'fingers crossed luck hope' }, { e: '🤟', k: 'love you sign' }, { e: '🤘', k: 'rock horns metal' }, { e: '🤙', k: 'call me shaka' }, { e: '👈', k: 'point left' }, { e: '👉', k: 'point right' }, { e: '👆', k: 'point up' }, { e: '👇', k: 'point down' }, { e: '☝️', k: 'point up one' }, { e: '✋', k: 'stop hand raised' }, { e: '🤚', k: 'back hand raised stop' }, { e: '🖐️', k: 'hand five fingers stop' }, { e: '🖖', k: 'vulcan spock salute' }, { e: '👋', k: 'wave hello bye' }, { e: '🤝', k: 'handshake deal agreement' }, { e: '👏', k: 'clap applause well done' }, { e: '🙌', k: 'hooray raised hands celebrate' }, { e: '👐', k: 'open hands hug' }, { e: '🤲', k: 'palms up pray hands' }, { e: '🙏', k: 'pray please thanks hope' }, { e: '✊', k: 'fist power solidarity' }, { e: '👊', k: 'fist bump punch' }, { e: '🤛', k: 'fist bump left' }, { e: '🤜', k: 'fist bump right' }, { e: '💪', k: 'muscle strong flex' }, { e: '🦾', k: 'robot arm strong prosthetic' }, { e: '🖕', k: 'middle finger rude' }, { e: '✍️', k: 'writing hand signature' }, { e: '🤳', k: 'selfie' }],
+  'Hearts': [{ e: '❤️', k: 'heart love red' }, { e: '🧡', k: 'heart love orange' }, { e: '💛', k: 'heart love yellow' }, { e: '💚', k: 'heart love green' }, { e: '💙', k: 'heart love blue' }, { e: '💜', k: 'heart love purple' }, { e: '🖤', k: 'heart love black' }, { e: '🤍', k: 'heart love white' }, { e: '🤎', k: 'heart love brown' }, { e: '💔', k: 'broken heart heartbreak sad' }, { e: '❣️', k: 'heart exclamation love' }, { e: '💕', k: 'hearts love two' }, { e: '💞', k: 'hearts revolving love' }, { e: '💓', k: 'heart beating love pulse' }, { e: '💗', k: 'heart growing love' }, { e: '💖', k: 'heart sparkle love shining' }, { e: '💘', k: 'heart arrow cupid love' }, { e: '💝', k: 'heart gift love ribbon' }, { e: '💟', k: 'heart decoration love' }, { e: '♥️', k: 'heart love suit' }],
+  'Animals & Nature': [{ e: '🐶', k: 'dog puppy pet' }, { e: '🐱', k: 'cat kitten pet' }, { e: '🐭', k: 'mouse' }, { e: '🐹', k: 'hamster pet' }, { e: '🐰', k: 'rabbit bunny' }, { e: '🦊', k: 'fox' }, { e: '🐻', k: 'bear' }, { e: '🐼', k: 'panda' }, { e: '🐨', k: 'koala' }, { e: '🐯', k: 'tiger' }, { e: '🦁', k: 'lion' }, { e: '🐮', k: 'cow' }, { e: '🐷', k: 'pig' }, { e: '🐸', k: 'frog' }, { e: '🐵', k: 'monkey' }, { e: '🐔', k: 'chicken' }, { e: '🐧', k: 'penguin' }, { e: '🐦', k: 'bird' }, { e: '🐤', k: 'chick baby bird' }, { e: '🦆', k: 'duck' }, { e: '🦅', k: 'eagle' }, { e: '🦉', k: 'owl' }, { e: '🐺', k: 'wolf' }, { e: '🐗', k: 'boar' }, { e: '🐴', k: 'horse' }, { e: '🦄', k: 'unicorn' }, { e: '🐝', k: 'bee' }, { e: '🐛', k: 'caterpillar bug' }, { e: '🦋', k: 'butterfly' }, { e: '🐌', k: 'snail slow' }, { e: '🐞', k: 'ladybug bug' }, { e: '🐢', k: 'turtle slow' }, { e: '🐍', k: 'snake' }, { e: '🦖', k: 'dinosaur trex' }, { e: '🐙', k: 'octopus' }, { e: '🐬', k: 'dolphin' }, { e: '🐳', k: 'whale' }, { e: '🐘', k: 'elephant' }, { e: '🦒', k: 'giraffe' }, { e: '🌸', k: 'flower blossom cherry' }, { e: '🌻', k: 'sunflower flower' }, { e: '🌼', k: 'flower daisy' }, { e: '🌷', k: 'tulip flower' }, { e: '🌹', k: 'rose flower love' }, { e: '🍀', k: 'clover luck lucky' }, { e: '🌈', k: 'rainbow pride' }, { e: '☀️', k: 'sun sunny weather' }, { e: '⭐', k: 'star' }, { e: '🌙', k: 'moon night' }],
+  'Food': [{ e: '🍏', k: 'apple green fruit' }, { e: '🍎', k: 'apple red fruit' }, { e: '🍊', k: 'orange fruit' }, { e: '🍋', k: 'lemon fruit sour' }, { e: '🍌', k: 'banana fruit' }, { e: '🍉', k: 'watermelon fruit' }, { e: '🍇', k: 'grapes fruit' }, { e: '🍓', k: 'strawberry fruit' }, { e: '🍒', k: 'cherry fruit' }, { e: '🍑', k: 'peach fruit butt' }, { e: '🥭', k: 'mango fruit' }, { e: '🍍', k: 'pineapple fruit' }, { e: '🥥', k: 'coconut fruit' }, { e: '🥝', k: 'kiwi fruit' }, { e: '🍅', k: 'tomato' }, { e: '🥑', k: 'avocado' }, { e: '🍕', k: 'pizza food' }, { e: '🍔', k: 'burger hamburger food' }, { e: '🍟', k: 'fries food' }, { e: '🌭', k: 'hotdog food' }, { e: '🍿', k: 'popcorn movie snack' }, { e: '🧂', k: 'salt seasoning' }, { e: '🥓', k: 'bacon food' }, { e: '🥚', k: 'egg food' }, { e: '🍳', k: 'fried egg cooking' }, { e: '🥞', k: 'pancakes food breakfast' }, { e: '🧇', k: 'waffle food breakfast' }, { e: '🍞', k: 'bread food' }, { e: '🥐', k: 'croissant bread food' }, { e: '🧀', k: 'cheese food' }, { e: '🍗', k: 'chicken leg food meat' }, { e: '🍖', k: 'meat food' }, { e: '🥩', k: 'steak meat food' }, { e: '🌮', k: 'taco food mexican' }, { e: '🌯', k: 'burrito food mexican' }, { e: '🍝', k: 'spaghetti pasta food' }, { e: '🍜', k: 'noodles ramen soup food' }, { e: '🍣', k: 'sushi food' }, { e: '🍩', k: 'donut food sweet' }, { e: '🍪', k: 'cookie food sweet' }, { e: '🎂', k: 'cake birthday' }, { e: '🍰', k: 'cake slice sweet dessert' }, { e: '🧁', k: 'cupcake dessert sweet' }, { e: '🍫', k: 'chocolate sweet' }, { e: '🍬', k: 'candy sweet' }, { e: '🍭', k: 'lollipop candy sweet' }, { e: '☕', k: 'coffee drink' }, { e: '🍵', k: 'tea drink' }, { e: '🥤', k: 'soda drink cup' }, { e: '🍺', k: 'beer drink alcohol' }, { e: '🍷', k: 'wine drink alcohol' }],
+  'Objects': [{ e: '⚽', k: 'soccer football ball sport' }, { e: '🏀', k: 'basketball ball sport' }, { e: '🏈', k: 'football american ball sport' }, { e: '⚾', k: 'baseball ball sport' }, { e: '🎾', k: 'tennis ball sport' }, { e: '🏐', k: 'volleyball ball sport' }, { e: '🎱', k: 'pool billiards 8ball' }, { e: '🏓', k: 'ping pong table tennis' }, { e: '🎮', k: 'game controller video games' }, { e: '🎲', k: 'dice game random' }, { e: '🎧', k: 'headphones music audio' }, { e: '🎸', k: 'guitar music' }, { e: '🎹', k: 'piano keyboard music' }, { e: '🎨', k: 'art paint palette creative' }, { e: '📷', k: 'camera photo' }, { e: '💻', k: 'laptop computer' }, { e: '📱', k: 'phone mobile' }, { e: '⌚', k: 'watch time clock' }, { e: '💡', k: 'idea light bulb bright' }, { e: '🔦', k: 'flashlight torch light' }, { e: '📚', k: 'books read study' }, { e: '✏️', k: 'pencil write' }, { e: '📌', k: 'pin note important' }, { e: '🔒', k: 'lock secure private' }, { e: '🔑', k: 'key unlock' }, { e: '🎁', k: 'gift present birthday' }, { e: '🎉', k: 'party celebrate confetti' }, { e: '🎈', k: 'balloon party celebrate' }, { e: '🏆', k: 'trophy win award champion' }, { e: '💯', k: 'hundred perfect score' }, { e: '🔥', k: 'fire hot lit awesome' }, { e: '✨', k: 'sparkles shiny magic' }, { e: '💤', k: 'sleep zzz tired' }, { e: '💬', k: 'chat speech bubble message' }, { e: '👀', k: 'eyes look watching' }]
 };
 
 let currentEmojiCategory = 'Smileys';
@@ -165,7 +167,7 @@ function renderEmojiTabs() {
     const tab = document.createElement('button');
     tab.type = 'button';
     tab.className = 'emoji-tab' + (category === currentEmojiCategory ? ' active' : '');
-    tab.textContent = EMOJI_CATEGORIES[category][0]; // use the category's first emoji as its tab icon
+    tab.textContent = EMOJI_CATEGORIES[category][0].e; // use the category's first emoji as its tab icon
     tab.title = category;
     tab.addEventListener('click', () => {
       currentEmojiCategory = category;
@@ -176,9 +178,14 @@ function renderEmojiTabs() {
   });
 }
 
-function renderEmojiGrid() {
+// Renders either the currently selected category (normal browsing) or a
+// flat list of search results across ALL categories (while actively searching).
+function renderEmojiGrid(items) {
+  const entries = items || EMOJI_CATEGORIES[currentEmojiCategory];
   emojiGridEl.innerHTML = '';
-  EMOJI_CATEGORIES[currentEmojiCategory].forEach((emoji) => {
+  emojiNoResults.classList.toggle('hidden', entries.length > 0);
+
+  entries.forEach(({ e: emoji }) => {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'emoji-item';
@@ -187,6 +194,30 @@ function renderEmojiGrid() {
     emojiGridEl.appendChild(btn);
   });
 }
+
+// Searches keywords across every category at once, not just the currently
+// open tab — e.g. typing "fire" finds 🔥 even while sitting on "Smileys".
+function searchEmoji(query) {
+  const q = query.trim().toLowerCase();
+  const results = [];
+  Object.values(EMOJI_CATEGORIES).forEach((entries) => {
+    entries.forEach((entry) => {
+      if (entry.k.includes(q)) results.push(entry);
+    });
+  });
+  return results;
+}
+
+emojiSearchInput.addEventListener('input', () => {
+  const query = emojiSearchInput.value;
+  if (!query.trim()) {
+    emojiTabsEl.classList.remove('hidden');
+    renderEmojiGrid();
+    return;
+  }
+  emojiTabsEl.classList.add('hidden');
+  renderEmojiGrid(searchEmoji(query));
+});
 
 // Inserts at the current cursor position (not just appended to the end), so
 // picking an emoji mid-sentence works the way anyone would expect.
@@ -204,7 +235,17 @@ function insertEmojiAtCursor(emoji) {
 
 emojiBtn.addEventListener('click', (e) => {
   e.stopPropagation();
+  const opening = emojiPopover.classList.contains('hidden');
   emojiPopover.classList.toggle('hidden');
+
+  if (opening) {
+    // Reset to a clean browsing state and auto-focus the search box, so the
+    // user can start typing a search immediately with no extra click.
+    emojiSearchInput.value = '';
+    emojiTabsEl.classList.remove('hidden');
+    renderEmojiGrid();
+    emojiSearchInput.focus();
+  }
 });
 
 document.addEventListener('click', (e) => {

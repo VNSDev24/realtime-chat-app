@@ -499,6 +499,18 @@ body {
 }
 .emoji-popover.hidden { display: none; }
 
+.emoji-search-input {
+  width: 100%; padding: 8px 10px; margin-bottom: 8px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--panel-light); color: var(--text);
+  font-size: 13px; box-sizing: border-box;
+}
+.emoji-search-input:focus { outline: none; border-color: var(--accent); }
+
+.emoji-no-results {
+  text-align: center; color: var(--text-dim); font-size: 13px; padding: 20px 0; margin: 0;
+}
+.emoji-no-results.hidden { display: none; }
+
 .emoji-tabs {
   display: flex; gap: 4px; border-bottom: 1px solid var(--border);
   padding-bottom: 8px; margin-bottom: 8px;
