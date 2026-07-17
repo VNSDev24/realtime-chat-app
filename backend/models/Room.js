@@ -54,6 +54,12 @@ const roomSchema = new mongoose.Schema(
     pendingRequests: [{
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User'
+    }],
+    // Pinned messages, most-recently-pinned first (managed as a simple
+    // array, not a separate collection — pin counts per room are small).
+    pinnedMessages: [{
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Message'
     }]
   },
   { timestamps: true }

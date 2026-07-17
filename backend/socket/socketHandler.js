@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 const Message = require('../models/Message');
 const Room = require('../models/Room');
+const { parseMentions } = require('../utils/mentions');
 
 // roomId -> Map<socketId, { userId, username }>
 const presenceByRoom = new Map();
@@ -160,7 +161,7 @@ function initSocket(io) {
       currentRoomId = null;
     });
 
-    socket.on('send_message', async ({ roomId, text }) => {
+    socket.on('send_message', async ({ roomId, text, replyTo }) => {
       try {
         if (!roomId || !text || !text.trim()) return;
 
@@ -172,11 +173,24 @@ function initSocket(io) {
           return;
         }
 
+        const trimmedText = text.trim();
+        const mentions = await parseMentions(trimmedText);
+
+        // If replying, fetch a lightweight snippet of the original message to
+        // embed directly — avoids the frontend needing a second round trip
+        // just to render the quoted preview.
+        let replyToDoc = null;
+        if (replyTo) {
+          replyToDoc = await Message.findOne({ _id: replyTo, room: roomId }).select('senderName text deleted');
+        }
+
         const message = await Message.create({
           room: roomId,
           sender: socket.user.id,
           senderName: socket.user.username,
-          text: text.trim()
+          text: trimmedText,
+          mentions,
+          replyTo: replyToDoc ? replyToDoc._id : null
         });
 
         io.to(roomId).emit('receive_message', {
@@ -185,7 +199,11 @@ function initSocket(io) {
           sender: socket.user.id,
           senderName: socket.user.username,
           text: message.text,
-          createdAt: message.createdAt
+          createdAt: message.createdAt,
+          mentions: message.mentions,
+          replyTo: replyToDoc
+            ? { _id: replyToDoc._id, senderName: replyToDoc.senderName, text: replyToDoc.text, deleted: replyToDoc.deleted }
+            : null
         });
       } catch (err) {
         console.error('send_message error:', err.message);

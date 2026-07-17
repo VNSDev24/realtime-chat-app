@@ -13,7 +13,7 @@
 <body>
 
   <button id="theme-toggle-btn" title="Toggle light/dark theme">🌙</button>
-  <div id="app-version" class="app-version">v1.15.0</div>
+  <div id="app-version" class="app-version">v1.16.0</div>
 
   <!-- Auth screen -->
   <section id="auth-screen" class="screen">
@@ -106,6 +106,8 @@
       <header class="chat-header">
         <h2 id="active-room-name">Select a room</h2>
         <div class="chat-header-right">
+          <button id="pinned-toggle-btn" class="pinned-toggle-btn hidden" title="View pinned messages">📌 <span id="pinned-count">0</span></button>
+          <button id="search-toggle-btn" class="search-toggle-btn" title="Search messages">🔍</button>
           <div class="online-users-wrapper">
             <button id="online-users-toggle" class="online-users-toggle">● 0 Online ▾</button>
             <div id="online-users-dropdown" class="online-users-dropdown hidden">
@@ -118,6 +120,21 @@
         </div>
       </header>
 
+      <div id="search-panel" class="search-panel hidden">
+        <input type="text" id="search-input" placeholder="Search messages in this room..." autocomplete="off" />
+        <button type="button" id="close-search-btn">✕</button>
+        <div id="search-results" class="search-results"></div>
+      </div>
+
+      <div id="pinned-panel" class="pinned-panel hidden">
+        <div class="pinned-panel-header">
+          <h4>Pinned Messages</h4>
+          <button type="button" id="close-pinned-btn">✕</button>
+        </div>
+        <ul id="pinned-list"></ul>
+        <p id="pinned-empty-msg" class="form-msg hidden">No pinned messages yet.</p>
+      </div>
+
       <div id="empty-state" class="empty-state">
         <p>Click on a room to join the conversation.</p>
       </div>
@@ -125,6 +142,14 @@
       <div id="messages" class="messages hidden"></div>
 
       <div id="typing-indicator" class="typing-indicator"></div>
+
+      <div id="reply-preview-bar" class="reply-preview-bar hidden">
+        <div class="reply-preview-content">
+          <span class="reply-preview-label">Replying to <strong id="reply-preview-name"></strong></span>
+          <span id="reply-preview-text" class="reply-preview-text"></span>
+        </div>
+        <button type="button" id="cancel-reply-btn">✕</button>
+      </div>
 
       <form id="message-form" class="message-form hidden">
         <div class="emoji-picker-wrapper">
@@ -137,9 +162,13 @@
           </div>
         </div>
         <button type="button" id="mic-btn" class="hidden" title="Dictate message">🎤</button>
-        <input type="text" id="message-input" placeholder="Type a message..." autocomplete="off" disabled />
+        <div class="message-input-wrapper">
+          <input type="text" id="message-input" placeholder="Type a message..." autocomplete="off" disabled />
+          <div id="mention-autocomplete" class="mention-autocomplete hidden"></div>
+        </div>
         <button type="submit" id="send-btn" disabled>Send</button>
       </form>
+
       <p id="mic-error-msg" class="mic-error-msg hidden"></p>
     </main>
   </section>

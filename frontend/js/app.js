@@ -80,6 +80,27 @@ const onlineUsersList = document.getElementById('online-users-list');
 const deleteRoomBtn = document.getElementById('delete-room-btn');
 const blockedUsersBtn = document.getElementById('blocked-users-btn');
 const restrictToggleBtn = document.getElementById('restrict-toggle-btn');
+
+// Messaging enhancements
+const pinnedToggleBtn = document.getElementById('pinned-toggle-btn');
+const pinnedCountEl = document.getElementById('pinned-count');
+const pinnedPanel = document.getElementById('pinned-panel');
+const pinnedList = document.getElementById('pinned-list');
+const pinnedEmptyMsg = document.getElementById('pinned-empty-msg');
+const closePinnedBtn = document.getElementById('close-pinned-btn');
+
+const searchToggleBtn = document.getElementById('search-toggle-btn');
+const searchPanel = document.getElementById('search-panel');
+const searchInput = document.getElementById('search-input');
+const searchResultsEl = document.getElementById('search-results');
+const closeSearchBtn = document.getElementById('close-search-btn');
+
+const replyPreviewBar = document.getElementById('reply-preview-bar');
+const replyPreviewName = document.getElementById('reply-preview-name');
+const replyPreviewText = document.getElementById('reply-preview-text');
+const cancelReplyBtn = document.getElementById('cancel-reply-btn');
+
+const mentionAutocomplete = document.getElementById('mention-autocomplete');
 const emptyStateEl = document.getElementById('empty-state');
 const messagesEl = document.getElementById('messages');
 const typingIndicatorEl = document.getElementById('typing-indicator');
@@ -190,7 +211,15 @@ function renderEmojiGrid(items) {
     btn.type = 'button';
     btn.className = 'emoji-item';
     btn.textContent = emoji;
-    btn.addEventListener('click', () => insertEmojiAtCursor(emoji));
+    btn.addEventListener('click', () => {
+      if (reactionTargetMessageId) {
+        handleToggleReaction(reactionTargetMessageId, emoji);
+        reactionTargetMessageId = null;
+        emojiPopover.classList.add('hidden');
+      } else {
+        insertEmojiAtCursor(emoji);
+      }
+    });
     emojiGridEl.appendChild(btn);
   });
 }
@@ -241,6 +270,7 @@ emojiBtn.addEventListener('click', (e) => {
   if (opening) {
     // Reset to a clean browsing state and auto-focus the search box, so the
     // user can start typing a search immediately with no extra click.
+    reactionTargetMessageId = null; // opening via the compose button is always insert-mode
     emojiSearchInput.value = '';
     emojiTabsEl.classList.remove('hidden');
     renderEmojiGrid();
@@ -813,6 +843,30 @@ function connectSocket() {
 
   socket.on('message_deleted', ({ messageId }) => {
     markMessageDeletedInDom(messageId);
+  });
+
+  socket.on('message_edited', ({ _id, text, edited }) => {
+    const wrapper = messagesEl.querySelector(`[data-message-id="${_id}"]`);
+    if (!wrapper) return;
+    const bubble = wrapper.querySelector('.bubble');
+    if (bubble) bubble.innerHTML = highlightMentions(escapeHtml(text));
+    if (edited && !wrapper.querySelector('.edited-tag')) {
+      wrapper.querySelector('.meta').insertAdjacentHTML('beforeend', ' <span class="edited-tag">(edited)</span>');
+    }
+  });
+
+  socket.on('message_reaction_updated', ({ _id, reactions }) => {
+    const wrapper = messagesEl.querySelector(`[data-message-id="${_id}"]`);
+    if (!wrapper) return;
+    renderReactionsBar(wrapper, reactions);
+  });
+
+  socket.on('message_pinned', () => {
+    if (activeRoomId) refreshPinnedCount(activeRoomId);
+  });
+
+  socket.on('message_unpinned', () => {
+    if (activeRoomId) refreshPinnedCount(activeRoomId);
   });
 
   // Someone (possibly another browser tab, or the actual room creator) renamed
@@ -1390,6 +1444,11 @@ function showEmptyState() {
   deleteRoomBtn.classList.add('hidden');
   blockedUsersBtn.classList.add('hidden');
   restrictToggleBtn.classList.add('hidden');
+  pinnedToggleBtn.classList.add('hidden');
+  pinnedPanel.classList.add('hidden');
+  searchPanel.classList.add('hidden');
+  replyingToMessage = null;
+  replyPreviewBar.classList.add('hidden');
   document.querySelectorAll('#room-list li').forEach((li) => li.classList.remove('active'));
 }
 
@@ -1435,6 +1494,11 @@ async function selectRoom(roomId, roomName) {
   deleteRoomBtn.classList.toggle('hidden', !(room && room.isAdmin));
   blockedUsersBtn.classList.toggle('hidden', !(room && room.isAdmin));
   updateRestrictToggleBtn(room);
+  refreshPinnedCount(roomId);
+  pinnedPanel.classList.add('hidden');
+  searchPanel.classList.add('hidden');
+  replyingToMessage = null;
+  replyPreviewBar.classList.add('hidden');
 
   socket.emit('join_room', { roomId });
 
@@ -1535,9 +1599,16 @@ messageForm.addEventListener('submit', (e) => {
   const text = messageInput.value.trim();
   if (!text || !activeRoomId) return;
 
-  socket.emit('send_message', { roomId: activeRoomId, text });
+  socket.emit('send_message', {
+    roomId: activeRoomId,
+    text,
+    replyTo: replyingToMessage ? replyingToMessage._id : null
+  });
   messageInput.value = '';
   socket.emit('typing', { roomId: activeRoomId, isTyping: false });
+
+  replyingToMessage = null;
+  replyPreviewBar.classList.add('hidden');
 });
 
 messageInput.addEventListener('input', () => {
@@ -1548,7 +1619,73 @@ messageInput.addEventListener('input', () => {
   typingTimeout = setTimeout(() => {
     socket.emit('typing', { roomId: activeRoomId, isTyping: false });
   }, 1500);
+
+  updateMentionAutocomplete();
 });
+
+// ---------- @Mention autocomplete ----------
+// Candidates are drawn from currently-online users (already tracked via
+// lastPresenceUsers for the presence dropdown) — a reasonable proxy for
+// "who's actually here to mention" without a separate membership lookup.
+function updateMentionAutocomplete() {
+  const cursorPos = messageInput.selectionStart;
+  const textBeforeCursor = messageInput.value.slice(0, cursorPos);
+  const match = textBeforeCursor.match(/(?:^|\s)@([a-zA-Z0-9_]*)$/);
+
+  if (!match) {
+    mentionAutocomplete.classList.add('hidden');
+    return;
+  }
+
+  const partial = match[1].toLowerCase();
+  const candidates = lastPresenceUsers.filter((u) =>
+    u.username.toLowerCase().startsWith(partial) && u.username !== currentUser.username
+  );
+
+  if (candidates.length === 0) {
+    mentionAutocomplete.classList.add('hidden');
+    return;
+  }
+
+  mentionAutocomplete.innerHTML = '';
+  candidates.slice(0, 6).forEach((u) => {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'mention-autocomplete-item';
+    item.textContent = u.username;
+    item.addEventListener('click', () => applyMentionAutocomplete(u.username, match[0].length));
+    mentionAutocomplete.appendChild(item);
+  });
+  mentionAutocomplete.classList.remove('hidden');
+}
+
+function applyMentionAutocomplete(username, matchLength) {
+  const cursorPos = messageInput.selectionStart;
+  const before = messageInput.value.slice(0, cursorPos - matchLength);
+  const after = messageInput.value.slice(cursorPos);
+  const insertion = (before.length > 0 && !before.endsWith(' ') ? ' ' : '') + `@${username} `;
+  messageInput.value = before + insertion + after;
+
+  const newCursorPos = before.length + insertion.length;
+  messageInput.focus();
+  messageInput.setSelectionRange(newCursorPos, newCursorPos);
+  mentionAutocomplete.classList.add('hidden');
+}
+
+document.addEventListener('click', (e) => {
+  if (e.target !== messageInput && !mentionAutocomplete.contains(e.target)) {
+    mentionAutocomplete.classList.add('hidden');
+  }
+});
+
+// Tracks which message (if any) is currently being replied to.
+let replyingToMessage = null; // { _id, senderName, text } or null
+
+// When set, clicking an emoji in the popover reacts to this message instead
+// of inserting into the compose box (see the emoji-btn click handler below).
+let reactionTargetMessageId = null;
+
+const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
 
 function renderMessage(msg) {
   // ID-based ownership check: usernames are editable now, so comparing names
@@ -1562,25 +1699,244 @@ function renderMessage(msg) {
   const relativeTime = getRelativeTime(msg.createdAt);
   const isDeleted = msg.deleted || msg.text === 'Message deleted';
 
+  const editedTagHtml = (msg.edited && !isDeleted) ? ' <span class="edited-tag">(edited)</span>' : '';
+
   const deleteBtnHtml = (isOwn && !isDeleted)
-    ? `<button class="delete-msg-btn" title="Delete this message" data-message-id="${msg._id}">🗑</button>`
+    ? `<button class="msg-action-btn delete-msg-btn" title="Delete this message">🗑</button>`
+    : '';
+  const editBtnHtml = (isOwn && !isDeleted)
+    ? `<button class="msg-action-btn edit-msg-btn" title="Edit this message">✏️</button>`
+    : '';
+  const replyBtnHtml = !isDeleted
+    ? `<button class="msg-action-btn reply-msg-btn" title="Reply">↩️</button>`
+    : '';
+  const reactBtnHtml = !isDeleted
+    ? `<button class="msg-action-btn react-msg-btn" title="Add reaction">😊</button>`
     : '';
 
+  const activeRoom = roomsById[activeRoomId];
+  const viewerIsAdmin = Boolean(activeRoom && activeRoom.isAdmin);
+  const isPinned = ((activeRoom && activeRoom.pinnedMessages) || []).includes(msg._id);
+  const pinBtnHtml = (viewerIsAdmin && !isDeleted)
+    ? `<button class="msg-action-btn pin-msg-btn" title="${isPinned ? 'Unpin' : 'Pin'} this message">${isPinned ? '📌' : '📍'}</button>`
+    : '';
+
+  const replyPreviewHtml = renderReplyPreviewSnippet(msg.replyTo);
+  const bubbleText = isDeleted ? 'Message deleted' : highlightMentions(escapeHtml(msg.text));
+
   wrapper.innerHTML = `
-    <div class="meta">${getInitialsAvatar(msg.senderName)}${isOwn ? 'You' : escapeHtml(msg.senderName)} · <span class="msg-time" data-ts="${msg.createdAt}" title="${relativeTime}">${time}</span></div>
+    <div class="meta">${getInitialsAvatar(msg.senderName)}${isOwn ? 'You' : escapeHtml(msg.senderName)} · <span class="msg-time" data-ts="${msg.createdAt}" title="${relativeTime}">${time}</span>${editedTagHtml}</div>
     <div class="bubble-row">
-      <div class="bubble ${isDeleted ? 'deleted' : ''}">${isDeleted ? 'Message deleted' : escapeHtml(msg.text)}</div>
-      ${deleteBtnHtml}
+      ${replyPreviewHtml}
+      <div class="bubble ${isDeleted ? 'deleted' : ''}">${bubbleText}</div>
+      <div class="msg-actions">${replyBtnHtml}${reactBtnHtml}${pinBtnHtml}${editBtnHtml}${deleteBtnHtml}</div>
     </div>
+    <div class="reactions-bar"></div>
   `;
 
   messagesEl.appendChild(wrapper);
+  renderReactionsBar(wrapper, msg.reactions || []);
   messagesEl.scrollTop = messagesEl.scrollHeight;
 
   const deleteBtn = wrapper.querySelector('.delete-msg-btn');
   if (deleteBtn) {
     deleteBtn.addEventListener('click', () => handleDeleteMessage(msg._id, msg.room || activeRoomId));
   }
+
+  const editBtn = wrapper.querySelector('.edit-msg-btn');
+  if (editBtn) {
+    editBtn.addEventListener('click', () => startEditMessage(wrapper, msg));
+  }
+
+  const replyBtn = wrapper.querySelector('.reply-msg-btn');
+  if (replyBtn) {
+    replyBtn.addEventListener('click', () => startReplyTo(msg));
+  }
+
+  const reactBtn = wrapper.querySelector('.react-msg-btn');
+  if (reactBtn) {
+    reactBtn.addEventListener('click', (e) => openQuickReactPicker(e, msg._id));
+  }
+
+  const pinBtn = wrapper.querySelector('.pin-msg-btn');
+  if (pinBtn) {
+    pinBtn.addEventListener('click', () => handleTogglePin(msg._id, isPinned));
+  }
+
+  const replyQuote = wrapper.querySelector('.reply-quote');
+  if (replyQuote) {
+    replyQuote.addEventListener('click', () => jumpToMessage(replyQuote.dataset.replyId));
+  }
+}
+
+// Renders the small quoted snippet above a message that is itself a reply.
+// `replyTo` here is the lightweight {_id, senderName, text, deleted} object
+// the backend already attaches — no separate lookup needed.
+function renderReplyPreviewSnippet(replyTo) {
+  if (!replyTo) return '';
+  const snippetText = replyTo.deleted ? 'Message deleted' : escapeHtml(replyTo.text).slice(0, 80);
+  return `
+    <div class="reply-quote" data-reply-id="${replyTo._id}">
+      <span class="reply-quote-name">${escapeHtml(replyTo.senderName)}</span>
+      <span class="reply-quote-text">${snippetText}</span>
+    </div>
+  `;
+}
+
+// Highlights @username mentions in already-HTML-escaped text. Purely a
+// visual affordance — it doesn't need to match the backend's validated
+// mention list exactly; a cosmetic false-positive highlight is harmless.
+function highlightMentions(escapedText) {
+  return escapedText.replace(/(?<![\w.])@([a-zA-Z0-9_]{3,30})/g, '<span class="mention-highlight">@$1</span>');
+}
+
+function renderReactionsBar(wrapper, reactions) {
+  const bar = wrapper.querySelector('.reactions-bar');
+  bar.innerHTML = '';
+  reactions.forEach(({ emoji, users }) => {
+    const pill = document.createElement('button');
+    pill.type = 'button';
+    pill.className = 'reaction-pill' + (users.includes(currentUser._id) ? ' reacted' : '');
+    pill.textContent = `${emoji} ${users.length}`;
+    pill.title = users.length === 1 ? '1 reaction' : `${users.length} reactions`;
+    pill.addEventListener('click', () => handleToggleReaction(wrapper.dataset.messageId, emoji));
+    bar.appendChild(pill);
+  });
+}
+
+async function handleToggleReaction(messageId, emoji) {
+  try {
+    await apiFetch(`/messages/${messageId}/react`, {
+      method: 'POST',
+      body: JSON.stringify({ emoji })
+    });
+    // No local re-render here — the message_reaction_updated broadcast
+    // (which we also receive ourselves) handles updating the UI.
+  } catch (err) {
+    console.error('Failed to toggle reaction:', err.message);
+  }
+}
+
+// A small popover of 6 common quick-react emoji, plus a "+" that reuses the
+// full emoji picker (in "react mode" — see the emoji-btn handler).
+function openQuickReactPicker(e, messageId) {
+  e.stopPropagation();
+  document.querySelectorAll('.quick-react-popover').forEach((el) => el.remove());
+
+  const popover = document.createElement('div');
+  popover.className = 'quick-react-popover';
+  QUICK_REACTIONS.forEach((emoji) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = emoji;
+    btn.addEventListener('click', () => {
+      handleToggleReaction(messageId, emoji);
+      popover.remove();
+    });
+    popover.appendChild(btn);
+  });
+
+  const moreBtn = document.createElement('button');
+  moreBtn.type = 'button';
+  moreBtn.className = 'quick-react-more';
+  moreBtn.textContent = '+';
+  moreBtn.title = 'More emoji';
+  moreBtn.addEventListener('click', () => {
+    reactionTargetMessageId = messageId;
+    popover.remove();
+    emojiPopover.classList.remove('hidden');
+    emojiSearchInput.value = '';
+    emojiTabsEl.classList.remove('hidden');
+    renderEmojiGrid();
+    emojiSearchInput.focus();
+  });
+  popover.appendChild(moreBtn);
+
+  e.target.closest('.msg-actions').appendChild(popover);
+
+  const closeOnOutsideClick = (evt) => {
+    if (!popover.contains(evt.target)) {
+      popover.remove();
+      document.removeEventListener('click', closeOnOutsideClick);
+    }
+  };
+  setTimeout(() => document.addEventListener('click', closeOnOutsideClick), 0);
+}
+
+// ---------- Reply-to ----------
+function startReplyTo(msg) {
+  replyingToMessage = { _id: msg._id, senderName: msg.senderName, text: msg.deleted ? 'Message deleted' : msg.text };
+  replyPreviewName.textContent = msg.senderName;
+  replyPreviewText.textContent = (msg.deleted ? 'Message deleted' : msg.text).slice(0, 80);
+  replyPreviewBar.classList.remove('hidden');
+  messageInput.focus();
+}
+
+cancelReplyBtn.addEventListener('click', () => {
+  replyingToMessage = null;
+  replyPreviewBar.classList.add('hidden');
+});
+
+function jumpToMessage(messageId) {
+  const target = messagesEl.querySelector(`[data-message-id="${messageId}"]`);
+  if (!target) return;
+  target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  target.classList.add('highlight-flash');
+  setTimeout(() => target.classList.remove('highlight-flash'), 1500);
+}
+
+// ---------- Edit message ----------
+function startEditMessage(wrapper, msg) {
+  const bubble = wrapper.querySelector('.bubble');
+  const originalText = msg.text;
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'edit-msg-input';
+  input.value = originalText;
+  input.maxLength = 2000;
+
+  bubble.replaceWith(input);
+  input.focus();
+  input.setSelectionRange(input.value.length, input.value.length);
+
+  let settled = false;
+
+  async function submit() {
+    if (settled) return;
+    settled = true;
+    const newText = input.value.trim();
+
+    if (!newText || newText === originalText) {
+      input.replaceWith(bubble);
+      return;
+    }
+
+    try {
+      const res = await apiFetch(`/messages/${msg._id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ text: newText })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to edit message');
+      // The message_edited broadcast (received by us too) updates the DOM.
+    } catch (err) {
+      alert(err.message);
+      input.replaceWith(bubble);
+    }
+  }
+
+  function cancel() {
+    if (settled) return;
+    settled = true;
+    input.replaceWith(bubble);
+  }
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') submit();
+    if (e.key === 'Escape') { e.stopPropagation(); cancel(); }
+  });
+  input.addEventListener('blur', submit);
 }
 
 // Deterministically generates a small colored initials avatar for a given
@@ -1631,6 +1987,136 @@ function markMessageDeletedInDom(messageId) {
   }
   const btn = wrapper.querySelector('.delete-msg-btn');
   if (btn) btn.remove();
+}
+
+// ---------- Pinned messages ----------
+async function handleTogglePin(messageId, isPinned) {
+  try {
+    const res = await apiFetch(`/rooms/${activeRoomId}/pin/${messageId}`, {
+      method: isPinned ? 'DELETE' : 'POST'
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to update pin');
+    await loadRooms(); // refreshes roomsById[activeRoomId].pinnedMessages
+    refreshPinnedCount(activeRoomId);
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+async function refreshPinnedCount(roomId) {
+  try {
+    const res = await apiFetch(`/rooms/${roomId}/pinned`);
+    const pinned = await res.json();
+    if (!res.ok) return;
+    pinnedCountEl.textContent = pinned.length;
+    pinnedToggleBtn.classList.toggle('hidden', pinned.length === 0 && !(roomsById[roomId] && roomsById[roomId].isAdmin));
+  } catch (err) {
+    console.error('Failed to refresh pinned count:', err.message);
+  }
+}
+
+async function openPinnedPanel() {
+  if (!activeRoomId) return;
+  pinnedPanel.classList.remove('hidden');
+  searchPanel.classList.add('hidden');
+  pinnedList.innerHTML = '';
+  pinnedEmptyMsg.classList.add('hidden');
+
+  try {
+    const res = await apiFetch(`/rooms/${activeRoomId}/pinned`);
+    const pinned = await res.json();
+    if (!res.ok) throw new Error(pinned.error || 'Failed to load pinned messages');
+
+    if (pinned.length === 0) {
+      pinnedEmptyMsg.classList.remove('hidden');
+      return;
+    }
+
+    pinned.forEach((msg) => {
+      const li = document.createElement('li');
+      li.className = 'pinned-item';
+      const snippet = msg.deleted ? 'Message deleted' : escapeHtml(msg.text).slice(0, 100);
+      li.innerHTML = `
+        <div class="pinned-item-content" data-message-id="${msg._id}">
+          <span class="pinned-item-name">${escapeHtml(msg.senderName)}</span>
+          <span class="pinned-item-text">${snippet}</span>
+        </div>
+        <button class="pinned-unpin-btn" title="Unpin">✕</button>
+      `;
+      li.querySelector('.pinned-item-content').addEventListener('click', () => {
+        pinnedPanel.classList.add('hidden');
+        jumpToMessage(msg._id);
+      });
+      li.querySelector('.pinned-unpin-btn').addEventListener('click', async (e) => {
+        e.stopPropagation();
+        await handleTogglePin(msg._id, true);
+        openPinnedPanel(); // refresh the panel's own list
+      });
+      pinnedList.appendChild(li);
+    });
+  } catch (err) {
+    pinnedList.innerHTML = `<li>${escapeHtml(err.message)}</li>`;
+  }
+}
+
+pinnedToggleBtn.addEventListener('click', openPinnedPanel);
+closePinnedBtn.addEventListener('click', () => pinnedPanel.classList.add('hidden'));
+
+// ---------- In-room message search ----------
+searchToggleBtn.addEventListener('click', () => {
+  pinnedPanel.classList.add('hidden');
+  searchPanel.classList.toggle('hidden');
+  if (!searchPanel.classList.contains('hidden')) {
+    searchInput.value = '';
+    searchResultsEl.innerHTML = '';
+    searchInput.focus();
+  }
+});
+closeSearchBtn.addEventListener('click', () => searchPanel.classList.add('hidden'));
+
+let searchDebounceTimeout = null;
+searchInput.addEventListener('input', () => {
+  clearTimeout(searchDebounceTimeout);
+  const query = searchInput.value.trim();
+  if (!query) {
+    searchResultsEl.innerHTML = '';
+    return;
+  }
+  searchDebounceTimeout = setTimeout(() => runMessageSearch(query), 300);
+});
+
+async function runMessageSearch(query) {
+  if (!activeRoomId) return;
+  try {
+    const res = await apiFetch(`/rooms/${activeRoomId}/search?q=${encodeURIComponent(query)}`);
+    const results = await res.json();
+    if (!res.ok) throw new Error(results.error || 'Search failed');
+
+    searchResultsEl.innerHTML = '';
+    if (results.length === 0) {
+      searchResultsEl.innerHTML = '<p class="form-msg">No messages found.</p>';
+      return;
+    }
+
+    results.forEach((msg) => {
+      const item = document.createElement('div');
+      item.className = 'search-result-item';
+      const time = new Date(msg.createdAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+      item.innerHTML = `
+        <span class="search-result-name">${escapeHtml(msg.senderName)}</span>
+        <span class="search-result-time">${time}</span>
+        <div class="search-result-text">${escapeHtml(msg.text)}</div>
+      `;
+      item.addEventListener('click', () => {
+        searchPanel.classList.add('hidden');
+        jumpToMessage(msg._id);
+      });
+      searchResultsEl.appendChild(item);
+    });
+  } catch (err) {
+    searchResultsEl.innerHTML = `<p class="form-msg">${escapeHtml(err.message)}</p>`;
+  }
 }
 
 function renderSystemNote(text) {

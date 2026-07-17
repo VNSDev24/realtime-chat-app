@@ -567,6 +567,7 @@ router.get('/:roomId/messages', requireAuth, async (req, res) => {
     })
       .sort({ createdAt: -1 })
       .limit(limit)
+      .populate('replyTo', 'senderName text deleted')
       .lean();
 
     // Return in chronological order (oldest first) for easy rendering
@@ -574,6 +575,116 @@ router.get('/:roomId/messages', requireAuth, async (req, res) => {
   } catch (err) {
     console.error('Fetch messages error:', err.message);
     res.status(500).json({ error: 'Failed to fetch message history' });
+  }
+});
+
+// POST /api/rooms/:roomId/pin/:messageId - pin a message. Any admin may do this.
+router.post('/:roomId/pin/:messageId', requireAuth, async (req, res) => {
+  try {
+    const room = await Room.findById(req.params.roomId);
+    if (!room) {
+      return res.status(404).json({ error: 'Room not found' });
+    }
+    if (!isAdminOf(room, req.user.id)) {
+      return res.status(403).json({ error: 'Only a room admin can pin messages' });
+    }
+
+    const message = await Message.findOne({ _id: req.params.messageId, room: room._id });
+    if (!message) {
+      return res.status(404).json({ error: 'Message not found in this room' });
+    }
+    if (message.deleted) {
+      return res.status(400).json({ error: 'Cannot pin a deleted message' });
+    }
+
+    if (!room.pinnedMessages.some((p) => p.toString() === message._id.toString())) {
+      room.pinnedMessages.unshift(message._id); // most-recently-pinned first
+      await room.save();
+    }
+
+    const io = req.app.get('io');
+    if (io) {
+      io.to(room._id.toString()).emit('message_pinned', {
+        roomId: room._id,
+        messageId: message._id,
+        senderName: message.senderName,
+        text: message.text
+      });
+    }
+
+    res.json({ status: 'pinned' });
+  } catch (err) {
+    console.error('Pin message error:', err.message);
+    res.status(500).json({ error: 'Failed to pin message' });
+  }
+});
+
+// DELETE /api/rooms/:roomId/pin/:messageId - unpin a message. Any admin may do this.
+router.delete('/:roomId/pin/:messageId', requireAuth, async (req, res) => {
+  try {
+    const room = await Room.findById(req.params.roomId);
+    if (!room) {
+      return res.status(404).json({ error: 'Room not found' });
+    }
+    if (!isAdminOf(room, req.user.id)) {
+      return res.status(403).json({ error: 'Only a room admin can unpin messages' });
+    }
+
+    room.pinnedMessages = room.pinnedMessages.filter((p) => p.toString() !== req.params.messageId);
+    await room.save();
+
+    const io = req.app.get('io');
+    if (io) {
+      io.to(room._id.toString()).emit('message_unpinned', { roomId: room._id, messageId: req.params.messageId });
+    }
+
+    res.json({ status: 'unpinned' });
+  } catch (err) {
+    console.error('Unpin message error:', err.message);
+    res.status(500).json({ error: 'Failed to unpin message' });
+  }
+});
+
+// GET /api/rooms/:roomId/pinned - list currently pinned messages, most-recent first.
+router.get('/:roomId/pinned', requireAuth, async (req, res) => {
+  try {
+    const room = await Room.findById(req.params.roomId).populate({
+      path: 'pinnedMessages',
+      select: 'senderName text createdAt deleted'
+    });
+    if (!room) {
+      return res.status(404).json({ error: 'Room not found' });
+    }
+    res.json(room.pinnedMessages);
+  } catch (err) {
+    console.error('Fetch pinned messages error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch pinned messages' });
+  }
+});
+
+// GET /api/rooms/:roomId/search?q=... - keyword search within a single room's
+// message history, using MongoDB's text index. Deleted messages are excluded
+// since their real text no longer exists.
+router.get('/:roomId/search', requireAuth, async (req, res) => {
+  try {
+    const query = (req.query.q || '').trim();
+    if (!query) {
+      return res.status(400).json({ error: 'q (search query) is required' });
+    }
+
+    const results = await Message.find({
+      room: req.params.roomId,
+      deleted: false,
+      $text: { $search: query }
+    })
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .lean();
+
+    res.json(results);
+  } catch (err) {
+    console.error('Search messages error:', err.message);
+    res.status(500).json({ error: 'Failed to search messages' });
   }
 });
 
